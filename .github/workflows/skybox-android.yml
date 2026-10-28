@@ -21,16 +21,18 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-      - uses: android-actions/setup-android@v3
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.12'
       - name: Install Android tools
-        run: sdkmanager 'platforms;android-35' 'platforms;android-24' 'build-tools;35.0.0' 'ndk;28.2.13676358'
+        # The hosted runner ships the SDK; setup-android@v3 fails on the retired "tools" package.
+        run: |
+          sdkmanager="$(ls "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | tail -1)"
+          "$sdkmanager" 'platforms;android-35' 'platforms;android-24' 'build-tools;35.0.0' 'ndk;28.2.13676358' > /dev/null
       - name: Build reF1nd ARM64 core
-        env:
-          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/28.2.13676358
-        run: bash android-ui/tools/build-core.sh
+        run: |
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/28.2.13676358"
+          bash android-ui/tools/build-core.sh
       - name: Build and lint APK
         run: gradle -p android-ui --no-daemon assembleDebug lintDebug
       - name: Upload ARM64 APK and lint report

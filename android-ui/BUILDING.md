@@ -1,6 +1,6 @@
 # SkyBox Android ARM64
 
-SkyBox 是基于 reF1nd/sing-box 的独立 Android 客户端，采用蓝色渐变天气仪表、顶部配置切换/连接开关、大号 HTTP 延迟读数、最近一分钟下载记录、用量卡片和悬浮四页底栏。内核来自 `reF1nd-testing`，基线提交 `17397d022`；应用包名 `io.github.yuedaochangmendian.skybox`，Android 7.0+（API 24），ABI 仅 `arm64-v8a`。
+SkyBox 是基于 reF1nd/sing-box 的独立 Android 客户端，采用蓝色渐变天气仪表、顶部配置切换/连接开关、大号 HTTP 延迟读数、最近一分钟下载记录、用量卡片和悬浮四页底栏。内核来自 `reF1nd-testing-next`，基线提交 `3cf2b01ce`（`v1.15.0-alpha.13-reF1nd` 之上叠加 DNS 缓存修复 `1d089fcba`）；应用包名 `io.github.yuedaochangmendian.skybox`，Android 7.0+（API 24），ABI 仅 `arm64-v8a`。
 
 ## 使用
 
@@ -41,6 +41,13 @@ GitHub Actions 工作流 **SkyBox Android ARM64**（`.github/workflows/skybox-an
 APK 构建、Android Lint、签名与 ZIP/ABI 检查结果以本次交付说明为准。未连接 ARM64 Android 真机时，不能声称已经验证系统 VPN 授权、实际代理联网或像素级截图还原。
 
 本项目与内核遵循根目录 `../LICENSE` 的 GPL-3.0-or-later 及相关命名/归属说明。sing-box Copyright (C) 2022 nekohasekai；SkyBox 为独立衍生客户端，不代表 SagerNet 官方或上游背书。分发 APK 应同时提供对应分支源码、许可证及依赖许可。
+
+## v1.3.0 内核基线更新说明
+
+- 内核基线从 `reF1nd-testing` 的 `17397d022`（`v1.15.0-alpha.13-reF1nd`）前移到 `reF1nd-testing-next` 的 `3cf2b01ce`，内容差异为 4 个文件、115 行：`protocol/dns/outbound.go` 与 `route/route.go` 的 DNS 缓存修复（上游 `1d089fcba` "DNS: Fix some cache issues"）及其新增测试。
+- `experimental/libbox` 导出接口与 1.2.0 完全一致（该目录零 diff），应用侧 Kotlin 代码无需改动，仅重新生成 `libbox.aar`。
+- `reF1nd-testing-next` 是 reF1nd 的重放分支：功能补丁与 `reF1nd-testing` 同源，但提交 SHA 不同，因此本次采用 `git rebase --onto` 把 SkyBox 的 4 个应用提交（`fc01fdebd`、`b0302d273`、`7f4c9b050`、`b58763cfb`）重放到新基线上，`android-ui/` 目录内容逐字节不变。
+- 该分支尚未出现在 `reF1nd/sing-box-releases` 的发布列表里（最新发布仍是 `v1.15.0-alpha.13-reF1nd`），属测试通道最新提交；稳定通道 `v1.14.4-reF1nd`（`732618a`）是 1.14 分支，功能更旧，未采用。
 
 ## v1.2.0 Kotlin 迁移说明
 

@@ -1,0 +1,21 @@
+{
+  "log": { "level": "info", "timestamp": true },
+  "dns": {
+    "servers": [ { "type": "udp", "tag": "dns-direct", "server": "1.1.1.1", "server_port": 53 } ],
+    "final": "dns-direct"
+  },
+  "inbounds": [ {
+    "type": "tun", "tag": "tun-in", "address": [ "172.19.0.1/30", "fdfe:dcba:9876::1/126" ],
+    "mtu": 1500, "auto_route": true
+  } ],
+  "outbounds": [
+    { "type": "selector", "tag": "节点选择", "outbounds": [ "自动测速", "直连-1", "直连-2" ], "default": "自动测速" },
+    { "type": "urltest", "tag": "自动测速", "outbounds": [ "直连-1", "直连-2" ] },
+    { "type": "direct", "tag": "直连-1" },
+    { "type": "direct", "tag": "直连-2" }
+  ],
+  "route": {
+    "rules": [ { "protocol": "dns", "action": "hijack-dns" } ],
+    "final": "节点选择", "auto_detect_interface": true
+  }
+}

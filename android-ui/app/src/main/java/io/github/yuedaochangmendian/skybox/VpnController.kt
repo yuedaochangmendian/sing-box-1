@@ -154,6 +154,7 @@ class VpnController : VpnService(), PlatformInterface, CommandServerHandler, Com
                 sampleAt = SystemClock.elapsedRealtime()
                 sampleTotal = 0
             }
+            VpnGroups.clear()
             LatencyProbe.milliseconds = -1
             LatencyProbe.fastest = -1
             LatencyProbe.slowest = -1
@@ -176,12 +177,16 @@ class VpnController : VpnService(), PlatformInterface, CommandServerHandler, Com
             val options = CommandClientOptions()
             options.addCommand(Libbox.CommandStatus)
             options.addCommand(Libbox.CommandLog)
+            options.addCommand(Libbox.CommandGroup)
             options.setStatusInterval(1000000000L)
             val createdClient = Libbox.newCommandClient(this, options)
             client = createdClient
+            currentClient = createdClient
             createdClient.connect()
             foreground(ProfileStore.activeName(this))
             log("VPN 已连接")
+            // First reading for the home latency pill; later refreshes come from the UI ticker.
+            LatencyProbe.test()
         } catch (e: Exception) {
             connectFailed(e, requestId)
         } catch (e: LinkageError) {
@@ -200,13 +205,14 @@ class VpnController : VpnService(), PlatformInterface, CommandServerHandler, Com
     private fun stopCore() {
         stopping = true
         try {
-            val currentClient = client
-            if (currentClient != null) {
+            val activeClient = client
+            if (activeClient != null) {
                 try {
-                    currentClient.disconnect()
+                    activeClient.disconnect()
                 } catch (ignored: Exception) {
                 }
                 client = null
+                currentClient = null
             }
             val currentServer = server
             if (currentServer != null) {
@@ -227,6 +233,8 @@ class VpnController : VpnService(), PlatformInterface, CommandServerHandler, Com
                 }
                 tun = null
             }
+            VpnGroups.clear()
+            notifyGroupsChanged()
             val currentCallback = callback
             if (currentCallback != null) {
                 try {
@@ -673,9 +681,15 @@ class VpnController : VpnService(), PlatformInterface, CommandServerHandler, Com
 
     override fun writeConnectionEvents(events: ConnectionEvents) {}
 
-    override fun writeGroups(groups: OutboundGroupIterator) {}
+    override fun writeGroups(groups: OutboundGroupIterator) {
+        VpnGroups.replace(groups)
+        notifyGroupsChanged()
+    }
 
-    override fun writeOutbounds(outbounds: OutboundGroupItemIterator) {}
+    override fun writeOutbounds(outbounds: OutboundGroupItemIterator) {
+        VpnGroups.patchDelays(outbounds)
+        notifyGroupsChanged()
+    }
 
     override fun writeLogs(entries: LogIterator) {
         while (entries.hasNext()) log(entries.next().getMessage())
@@ -688,9 +702,9 @@ class VpnController : VpnService(), PlatformInterface, CommandServerHandler, Com
         uplinkTotal = status.getUplinkTotal()
         synchronized(LOCK) {
             val now = SystemClock.elapsedRealtime()
-            if (now - sampleAt >= 10000) {
+            if (now - sampleAt >= SAMPLE_INTERVAL_MS) {
                 HISTORY.addLast((downlinkTotal - sampleTotal).coerceAtLeast(0))
-                while (HISTORY.size > 6) HISTORY.removeFirst()
+                while (HISTORY.size > HISTORY_CAPACITY) HISTORY.removeFirst()
                 sampleAt = now
                 sampleTotal = downlinkTotal
             }
@@ -703,6 +717,48 @@ class VpnController : VpnService(), PlatformInterface, CommandServerHandler, Com
 
         @JvmField
         val ACTION_STOP = "skybox.STOP"
+
+        /** Set by the activity; invoked on the main thread whenever the group stream delivers. */
+        @Volatile
+        var onGroupsChanged: (() -> Unit)? = null
+
+        @Volatile
+        private var currentClient: CommandClient? = null
+
+        private val mainHandler = Handler(Looper.getMainLooper())
+
+        @JvmStatic
+        fun notifyGroupsChanged() {
+            mainHandler.post { onGroupsChanged?.invoke() }
+        }
+
+        /** Runs on a worker thread; the group stream pushes the fresh selection back. */
+        @JvmStatic
+        fun selectOutbound(groupTag: String, outboundTag: String, onError: (String) -> Unit) {
+            worker.execute {
+                val target = currentClient
+                if (target == null) {
+                    mainHandler.post { onError("VPN 未运行") }
+                    return@execute
+                }
+                try {
+                    target.selectOutbound(groupTag, outboundTag)
+                } catch (e: Exception) {
+                    val message = e.message ?: "切换失败"
+                    mainHandler.post { onError(message) }
+                }
+            }
+        }
+
+        @JvmStatic
+        fun urlTest(outboundTag: String) {
+            worker.execute {
+                try {
+                    currentClient?.urlTest(outboundTag)
+                } catch (ignored: Exception) {
+                }
+            }
+        }
 
         @JvmField
         @Volatile
@@ -734,7 +790,11 @@ class VpnController : VpnService(), PlatformInterface, CommandServerHandler, Com
 
         private val LOCK = Any()
         private val LOGS = java.util.ArrayDeque<String>()
+
+        /** Download bytes per [SAMPLE_INTERVAL_MS] bucket, chronological, capped at 12 minutes. */
         private val HISTORY = java.util.ArrayDeque<Long>()
+        private const val SAMPLE_INTERVAL_MS = 10_000L
+        private const val HISTORY_CAPACITY = 72
         private var sampleAt = 0L
         private var sampleTotal = 0L
         private val worker: ExecutorService = Executors.newSingleThreadExecutor()
@@ -747,7 +807,10 @@ class VpnController : VpnService(), PlatformInterface, CommandServerHandler, Com
         fun logs(): String = synchronized(LOCK) { LOGS.joinToString("\n") }
 
         @JvmStatic
-        fun downloadHistory(): LongArray = synchronized(LOCK) { HISTORY.toLongArray() }
+        fun speedHistory(): LongArray = synchronized(LOCK) { HISTORY.toLongArray() }
+
+        @JvmStatic
+        fun speedSampleIntervalMs(): Long = SAMPLE_INTERVAL_MS
 
         private fun log(value: String) {
             synchronized(LOCK) {

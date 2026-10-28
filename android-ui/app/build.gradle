@@ -12,10 +12,11 @@ android {
         applicationId 'io.github.yuedaochangmendian.skybox'
         minSdk 24
         targetSdk 35
-        versionCode 5
-        versionName '1.4.0'
+        versionCode 6
+        versionName '2.3.0'
         ndk {
-            abiFilters 'arm64-v8a'
+            // Release ships arm64 only; pass -PskyboxAbi=x86_64 for local emulator builds.
+            abiFilters (project.findProperty('skyboxAbi') ?: 'arm64-v8a')
         }
     }
 

@@ -13,6 +13,15 @@ class DailyForecast(
     fun isValid(): Boolean = max.isFinite() && min.isFinite() && max >= min
 }
 
+/** One hour of the nowcast-style detail view. label is localized ("14时"), temperature Celsius. */
+class HourForecast(
+    val label: String,
+    val weatherCode: Int,
+    val temperature: Double,
+) {
+    fun isValid(): Boolean = temperature.isFinite()
+}
+
 /**
  * Immutable weather snapshot. Temperatures are Celsius, precipitation is mm and wind is km/h.
  * Missing measurements are Double.NaN; updatedAt is the last successful fetch time (epoch ms),
@@ -41,6 +50,7 @@ class WeatherState(
     val precipitation15: List<Double> = emptyList(),
     val aqi: Double = Double.NaN,
     val aqiLabel: String = "",
+    val hourly: List<HourForecast> = emptyList(),
 ) {
     fun hasData(): Boolean = updatedAt > 0L && !temperature.isNaN() && !temperature.isInfinite()
 
@@ -52,7 +62,7 @@ class WeatherState(
         WeatherState(
             city, country, latitude, longitude, temperature, apparentTemperature,
             precipitation, windSpeed, weatherCode, isDay, updatedAt,
-            stale, error, loading, message, daily, precipitation15, aqi, aqiLabel,
+            stale, error, loading, message, daily, precipitation15, aqi, aqiLabel, hourly,
         )
 
     companion object {

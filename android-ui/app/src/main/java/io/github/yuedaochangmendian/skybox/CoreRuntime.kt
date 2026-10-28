@@ -1,6 +1,7 @@
 package io.github.yuedaochangmendian.skybox
 
 import android.content.Context
+import go.Seq
 import io.nekohasekai.libbox.Libbox
 import io.nekohasekai.libbox.SetupOptions
 import java.io.File
@@ -21,7 +22,7 @@ object CoreRuntime {
         if ((!work.isDirectory && !work.mkdirs()) || (!temp.isDirectory && !temp.mkdirs())) {
             throw IOException("无法创建内核目录")
         }
-        go.Seq.setContext(context.applicationContext)
+        Seq.setContext(context.applicationContext)
         val options = SetupOptions()
         options.basePath = base.absolutePath
         options.workingPath = work.absolutePath
@@ -29,8 +30,8 @@ object CoreRuntime {
         options.fixAndroidStack = true
         options.logMaxLines = 300
         options.crashReportSource = "skybox"
-        options.appVersion = "1"
-        options.appMarketingVersion = "1.0.0"
+        options.appVersion = "6"
+        options.appMarketingVersion = "2.3.0"
         Libbox.setup(options)
         initialized = true
     }

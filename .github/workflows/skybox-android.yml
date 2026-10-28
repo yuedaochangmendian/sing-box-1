@@ -1,0 +1,42 @@
+name: SkyBox Android ARM64
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: skybox-android-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.5'
+          cache: true
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.12'
+      - name: Install Android tools
+        run: sdkmanager 'platforms;android-35' 'platforms;android-24' 'build-tools;35.0.0' 'ndk;28.2.13676358'
+      - name: Build reF1nd ARM64 core
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/28.2.13676358
+        run: bash android-ui/tools/build-core.sh
+      - name: Build and lint APK
+        run: gradle -p android-ui --no-daemon assembleDebug lintDebug
+      - name: Upload ARM64 APK and lint report
+        uses: actions/upload-artifact@v4
+        with:
+          name: skybox-arm64-v8a
+          path: |
+            android-ui/app/build/outputs/apk/debug/*.apk
+            android-ui/app/build/reports/lint-results-debug.html

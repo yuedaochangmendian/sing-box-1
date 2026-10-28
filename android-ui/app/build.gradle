@@ -1,0 +1,45 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'io.github.yuedaochangmendian.skybox'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'io.github.yuedaochangmendian.skybox'
+        minSdk 24
+        targetSdk 35
+        versionCode 1
+        versionName '1.0.0'
+        ndk {
+            abiFilters 'arm64-v8a'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    buildTypes {
+        release {
+            // Local/testing release: uses the same default debug key as debug.
+            // Replace with a private, stable signing configuration before distribution.
+            signingConfig signingConfigs.debug
+            minifyEnabled false
+            shrinkResources false
+        }
+    }
+
+    packaging {
+        jniLibs {
+            useLegacyPackaging false
+        }
+    }
+}
+
+dependencies {
+    implementation files('libs/libbox.aar')
+}

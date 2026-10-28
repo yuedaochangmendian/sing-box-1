@@ -1,5 +1,12 @@
 # sing-box
 
+## SkyBox Android ARM64
+
+本分支在 reF1nd 的 `reF1nd-testing` 内核上加入天气仪表风 Android 客户端 **SkyBox**。
+Android 工程与构建说明见 [`android-ui/BUILDING.md`](android-ui/BUILDING.md)。支持私有 JSON 配置管理、系统 VPN 授权与连接、实时流量及日志；ABI 为 `arm64-v8a`，最低 Android 7.0（API 24）。
+
+SkyBox 是独立衍生客户端，不代表 SagerNet 官方客户端。内核及衍生代码遵循本仓库 GPL-3.0-or-later 许可。
+
 The universal proxy platform.
 
 [![Packaging status](https://repology.org/badge/vertical-allrepos/sing-box.svg)](https://repology.org/project/sing-box/versions)

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<resources>
+    <string name="app_name">SkyBox</string>
+    <string name="vpn_channel_name">SkyBox VPN</string>
+    <string name="vpn_notification_title">SkyBox</string>
+    <string name="vpn_notification_text">VPN 服务正在运行</string>
+    <string name="license_attribution">SkyBox is based on sing-box. Copyright © 2022 nekohasekai &lt;contact-sagernet@sekai.icu&gt;. Licensed under GNU GPL v3 or later; see the repository LICENSE. SkyBox is an independent project and does not imply upstream endorsement.</string>
+</resources>

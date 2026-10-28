@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<resources>
+    <color name="sky_blue">#287DF0</color>
+    <color name="sky_background">#F4F8FF</color>
+    <color name="sky_white">#FFFFFF</color>
+</resources>

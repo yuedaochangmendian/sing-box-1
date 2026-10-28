@@ -40,3 +40,12 @@ GitHub Actions 工作流 **SkyBox Android ARM64**（`.github/workflows/skybox-an
 APK 构建、Android Lint、签名与 ZIP/ABI 检查结果以本次交付说明为准。未连接 ARM64 Android 真机时，不能声称已经验证系统 VPN 授权、实际代理联网或像素级截图还原。
 
 本项目与内核遵循根目录 `../LICENSE` 的 GPL-3.0-or-later 及相关命名/归属说明。sing-box Copyright (C) 2022 nekohasekai；SkyBox 为独立衍生客户端，不代表 SagerNet 官方或上游背书。分发 APK 应同时提供对应分支源码、许可证及依赖许可。
+
+## v1.1.0 天气数据与状态说明
+
+- 天气数据通过 HTTPS 请求 Open-Meteo（`https://api.open-meteo.com/`），无需配置 API key；获取新数据需要网络连接。
+- 城市由用户手动选择，按所选城市获取天气，不申请定位权限，也不依赖 GPS 或后台定位。
+- 天气数据按 15 分钟间隔刷新；这不是系统后台准点唤醒的保证，应用挂起或网络不可用时不能承诺实时更新。
+- 天气主题使用蓝天、太阳、云朵与线性导航图标。天气读数和晴雨画面只表达所选城市的天气，与真实 VPN 状态分离；获取到天气不代表 VPN 已连接，天气请求失败也不代表 VPN 已断开。
+- VPN 连接仍以 Android 系统授权与 sing-box 内核实际状态为准，活动页中的速率、累计流量和日志仍来自真实内核；天气刷新不会替用户授权 VPN、选择代理或伪造连接/流量。
+

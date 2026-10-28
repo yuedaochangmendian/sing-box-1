@@ -21,6 +21,7 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.Switch;
@@ -43,6 +44,10 @@ public final class MainActivity extends Activity {
     private static final int VPN_PERMISSION = 111;
     private static final int WHITE = Color.WHITE;
     private static final int SOFT = 0xDFFFFFFF;
+    private static final int T_PILL = 46;
+    private static final int T_DOCK_SLOT = 52;
+    private static final int T_DOCK_PAD = 4;
+    private static final int T_DOCK_MARGIN = 10;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private FrameLayout root;
@@ -52,7 +57,21 @@ public final class MainActivity extends Activity {
     private TextView profileLabel, nodeTitle, stateLabel, description, totalsLabel, routeLabel;
     private TextView errorLabel, logsLabel, versionLabel, latencyLabel, latencyHint;
     private TextView[] historyLabels;
-    private TextView[] historyIcons;
+    private WeatherIconView[] historyIcons;
+    private WeatherService weatherService;
+    private WeatherState weatherState;
+    private WeatherTheme theme = WeatherTheme.from(null);
+    private String themeKey = "";
+    private String lastWeatherStamp = "";
+    private TextView cityLabel, temperatureLabel, conditionsLabel, weatherDetails, weatherUpdated;
+    private WeatherIconView weatherIcon;
+    private AlertDialog cityDialog;
+    private LinearLayout cityResults;
+    private EditText cityInput;
+    private TextView citySearchStatus;
+    private final java.util.ArrayList<View> themedCards = new java.util.ArrayList<>();
+    private final java.util.ArrayList<View> themedPills = new java.util.ArrayList<>();
+    private final ImageView[] tabIcons = new ImageView[4];
     private Switch connectionSwitch;
     private TextView[] tabLabels = new TextView[4];
     private View[] tabPills = new View[4];
@@ -86,8 +105,37 @@ public final class MainActivity extends Activity {
         root = new FrameLayout(this);
         root.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
                 new int[]{0xFF3383D4, 0xFF5F9FE0, 0xFF8EC3EC}));
-        root.setFitsSystemWindows(true);
+        root.setOnApplyWindowInsetsListener((view, insets) -> {
+            int left = insets.getSystemWindowInsetLeft();
+            int top = insets.getSystemWindowInsetTop();
+            int right = insets.getSystemWindowInsetRight();
+            int bottom = insets.getSystemWindowInsetBottom();
+            if (Build.VERSION.SDK_INT >= 30) {
+                android.graphics.Insets safe = insets.getInsets(android.view.WindowInsets.Type.systemBars()
+                        | android.view.WindowInsets.Type.displayCutout() | android.view.WindowInsets.Type.ime());
+                left = safe.left; top = safe.top; right = safe.right; bottom = safe.bottom;
+            }
+            root.setPadding(left, top, right, bottom);
+            return insets;
+        });
         setContentView(root);
+        root.requestApplyInsets();
+        weatherService = new WeatherService(this, new WeatherService.Callback() {
+            public void onWeather(WeatherState state) {
+                if (isFinishing() || isDestroyed()) return;
+                weatherState = state;
+                applyWeather();
+            }
+            public void onCities(List<WeatherService.City> cities) { showCityResults(cities); }
+            public void onError(String message, boolean citySearch) {
+                if (isFinishing() || isDestroyed()) return;
+                if (citySearch && cityDialog != null && cityDialog.isShowing()) citySearchStatus.setText(message);
+            }
+        });
+        weatherState = weatherService.getState();
+        theme = WeatherTheme.from(weatherState);
+        themeKey = themeKey(theme);
+        WeatherTheme.apply(this, root, weatherState);
         buildPage();
         worker.execute(() -> {
             try {
@@ -112,6 +160,7 @@ public final class MainActivity extends Activity {
         resumed = true;
         handler.removeCallbacks(ticker);
         handler.post(ticker);
+        if (weatherService != null) weatherService.fetch(false);
     }
 
     @Override protected void onPause() {
@@ -122,6 +171,8 @@ public final class MainActivity extends Activity {
 
     @Override protected void onDestroy() {
         handler.removeCallbacksAndMessages(null);
+        if (cityDialog != null && cityDialog.isShowing()) cityDialog.dismiss();
+        if (weatherService != null) weatherService.close();
         worker.shutdown();
         super.onDestroy();
     }
@@ -129,8 +180,16 @@ public final class MainActivity extends Activity {
     private void buildPage() {
         profileLabel = nodeTitle = stateLabel = description = totalsLabel = routeLabel = null;
         errorLabel = logsLabel = versionLabel = latencyLabel = latencyHint = null;
+        cityLabel = temperatureLabel = conditionsLabel = weatherDetails = weatherUpdated = null;
+        weatherIcon = null;
         connectionSwitch = null;
-        historyLabels = historyIcons = null;
+        historyLabels = null;
+        historyIcons = null;
+        java.util.Arrays.fill(tabIcons, null);
+        java.util.Arrays.fill(tabLabels, null);
+        java.util.Arrays.fill(tabPills, null);
+        themedCards.clear();
+        themedPills.clear();
         root.removeAllViews();
         scroll = new ScrollView(this);
         scroll.setFillViewport(true);
@@ -150,15 +209,16 @@ public final class MainActivity extends Activity {
 
     private void buildOverview() {
         LinearLayout top = row();
-        profileLabel = text(ProfileStore.activeName(this) + "  ﹀", 16, WHITE);
-        profileLabel.setSingleLine(true);
-        profileLabel.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        profileLabel.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        profileLabel.setPadding(dp(16), dp(13), dp(12), dp(13));
-        profileLabel.setBackground(round(0x24FFFFFF, 32));
-        profileLabel.setContentDescription("选择当前配置");
-        profileLabel.setOnClickListener(v -> showProfilePicker());
-        top.addView(profileLabel, new LinearLayout.LayoutParams(0, dp(51), 1));
+        cityLabel = text(weatherCityName() + "  ﹀", 16, WHITE);
+        cityLabel.setSingleLine(true);
+        cityLabel.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        cityLabel.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        cityLabel.setPadding(dp(16), dp(13), dp(12), dp(13));
+        cityLabel.setBackground(round(0x24FFFFFF, 32));
+        cityLabel.setContentDescription("选择天气城市");
+        cityLabel.setOnClickListener(v -> showCityPicker());
+        themedPills.add(cityLabel);
+        top.addView(cityLabel, new LinearLayout.LayoutParams(0, T_PILL, 1));
         connectionSwitch = new Switch(this);
         connectionSwitch.setText("Off  ");
         connectionSwitch.setTextColor(WHITE);
@@ -175,18 +235,40 @@ public final class MainActivity extends Activity {
             if (checked) beginStart(); else stopConnection();
             refreshStatus();
         });
-        LinearLayout.LayoutParams toggleParams = new LinearLayout.LayoutParams(-2, dp(51));
+        themedPills.add(connectionSwitch);
+        LinearLayout.LayoutParams toggleParams = new LinearLayout.LayoutParams(-2, T_PILL);
         toggleParams.leftMargin = dp(12);
         top.addView(connectionSwitch, toggleParams);
         page.addView(top);
-        space(page, 38);
-        nodeTitle = text(ProfileStore.activeName(this), 27, WHITE);
-        nodeTitle.setGravity(Gravity.CENTER);
-        nodeTitle.setMaxLines(2);
-        page.addView(nodeTitle, full());
+        space(page, 18);
+        LinearLayout weather = row();
+        weather.setGravity(Gravity.CENTER);
+        weatherIcon = new WeatherIconView(this);
+        weatherIcon.setContentDescription("当前天气");
+        weather.addView(weatherIcon, new LinearLayout.LayoutParams(dp(72), dp(72)));
+        LinearLayout weatherText = column();
+        weatherText.setPadding(dp(14), 0, 0, 0);
+        temperatureLabel = text("—°", 46, WHITE);
+        temperatureLabel.setTypeface(Typeface.create("sans-serif-thin", Typeface.NORMAL));
+        temperatureLabel.setIncludeFontPadding(false);
+        weatherText.addView(temperatureLabel, full());
+        conditionsLabel = text("天气加载中…", 15, SOFT);
+        weatherText.addView(conditionsLabel, full());
+        weather.addView(weatherText, new LinearLayout.LayoutParams(0, -2, 1));
+        page.addView(weather, full());
+        weatherDetails = text("体感 — · 降水 — · 风 —", 12, SOFT);
+        weatherDetails.setGravity(Gravity.CENTER);
+        weatherDetails.setPadding(0, dp(4), 0, 0);
+        page.addView(weatherDetails, full());
+        weatherUpdated = text("", 11, 0xBBFFFFFF);
+        weatherUpdated.setGravity(Gravity.CENTER);
+        weatherUpdated.setPadding(0, dp(3), 0, 0);
+        weatherUpdated.setOnClickListener(v -> refreshWeather(true));
+        page.addView(weatherUpdated, full());
+        space(page, 16);
         LinearLayout reading = row();
         reading.setGravity(Gravity.CENTER);
-        latencyLabel = text("—", 112, WHITE);
+        latencyLabel = text("—", 68, WHITE);
         latencyLabel.setTypeface(Typeface.create("sans-serif-thin", Typeface.NORMAL));
         latencyLabel.setIncludeFontPadding(false);
         latencyLabel.setContentDescription("点击测试当前 VPN 路由的 HTTP 延迟");
@@ -197,53 +279,50 @@ public final class MainActivity extends Activity {
             }));
             refreshStatus();
         });
-        reading.addView(latencyLabel, new LinearLayout.LayoutParams(-2, dp(137)));
-        TextView unit = text("ms", 25, SOFT);
+        reading.addView(latencyLabel, new LinearLayout.LayoutParams(-2, dp(88)));
+        TextView unit = text("ms", 17, SOFT);
         LinearLayout.LayoutParams unitParams = new LinearLayout.LayoutParams(-2, -2);
         unitParams.gravity = Gravity.TOP;
-        unitParams.topMargin = dp(21);
-        unitParams.leftMargin = dp(7);
+        unitParams.topMargin = dp(13);
+        unitParams.leftMargin = dp(6);
         reading.addView(unit, unitParams);
         page.addView(reading, full());
-        latencyHint = text("点击读数测试 HTTP 延迟", 13, SOFT);
+        latencyHint = text("连接后点击测试 HTTP 延迟", 12, SOFT);
         latencyHint.setGravity(Gravity.CENTER);
         page.addView(latencyHint, full());
-        space(page, 20);
-        stateLabel = text("☀  已断开", 26, WHITE);
+        space(page, 14);
+        stateLabel = text("已断开", 17, WHITE);
         stateLabel.setGravity(Gravity.CENTER);
         page.addView(stateLabel, full());
-        description = text("选用配置后，开启你的连接。", 17, SOFT);
+        description = text("选用配置后，开启你的连接。", 13, SOFT);
         description.setGravity(Gravity.CENTER);
-        description.setPadding(dp(8), dp(6), dp(8), 0);
+        description.setPadding(dp(8), dp(4), dp(8), 0);
         page.addView(description, full());
-        TextView measureHint = text("状态来自本机 VPN 服务 · 天气图标仅作视觉提示", 11, 0xBBFFFFFF);
-        measureHint.setGravity(Gravity.CENTER);
-        measureHint.setPadding(0, dp(8), 0, 0);
-        page.addView(measureHint, full());
-        space(page, 36);
+        space(page, 16);
         LinearLayout history = card();
-        history.addView(text("最近一分钟 · 下载", 16, WHITE), full());
-        TextView historyHint = text("按时间展示服务采样；暂无采样时显示 —。", 13, SOFT);
-        historyHint.setPadding(0, dp(4), 0, dp(15));
+        history.addView(text("最近一分钟 · 下载", 15, WHITE), full());
+        TextView historyHint = text("天气图标对应下载量：晴为静默，云雨为有流量。", 12, SOFT);
+        historyHint.setPadding(0, dp(3), 0, dp(10));
         history.addView(historyHint, full());
         View divider = new View(this);
         divider.setBackgroundColor(0x1AFFFFFF);
         history.addView(divider, new LinearLayout.LayoutParams(-1, dp(1)));
         LinearLayout columns = row();
         historyLabels = new TextView[6];
-        historyIcons = new TextView[6];
+        historyIcons = new WeatherIconView[6];
         String[] times = {"−50″", "−40″", "−30″", "−20″", "−10″", "现在"};
         for (int i = 0; i < 6; i++) {
             LinearLayout cell = column();
             cell.setGravity(Gravity.CENTER);
-            cell.setPadding(0, dp(12), 0, 0);
-            TextView time = text(times[i], 13, SOFT);
+            cell.setPadding(0, dp(9), 0, 0);
+            TextView time = text(times[i], 12, SOFT);
             time.setGravity(Gravity.CENTER);
             cell.addView(time, full());
-            historyIcons[i] = text("·", 29, WHITE);
-            historyIcons[i].setGravity(Gravity.CENTER);
-            cell.addView(historyIcons[i], new LinearLayout.LayoutParams(-1, dp(47)));
-            historyLabels[i] = text("—", 13, WHITE);
+            WeatherIconView icon = new WeatherIconView(this);
+            icon.setTint(theme.secondaryTextColor);
+            cell.addView(icon, new LinearLayout.LayoutParams(-1, dp(30)));
+            historyIcons[i] = icon;
+            historyLabels[i] = text("—", 12, WHITE);
             historyLabels[i].setGravity(Gravity.CENTER);
             historyLabels[i].setMaxLines(1);
             cell.addView(historyLabels[i], full());
@@ -251,37 +330,36 @@ public final class MainActivity extends Activity {
         }
         history.addView(columns, full());
         page.addView(history, full());
-        space(page, 16);
+        space(page, 12);
         LinearLayout metrics = row();
         LinearLayout trafficCard = card();
-        trafficCard.addView(text("流量 · 当前服务", 14, SOFT), full());
-        totalsLabel = text("—", 27, WHITE);
-        totalsLabel.setPadding(0, dp(12), 0, dp(20));
+        trafficCard.addView(text("流量 · 当前服务", 13, SOFT), full());
+        totalsLabel = text("—", 22, WHITE);
+        totalsLabel.setPadding(0, dp(8), 0, dp(12));
         trafficCard.addView(totalsLabel, full());
-        TextView currentTraffic = text("实时速率见活动页", 12, SOFT);
-        trafficCard.addView(currentTraffic, full());
+        trafficCard.addView(text("实时速率见活动页", 11, SOFT), full());
         trafficCard.setOnClickListener(v -> selectTab(2));
         LinearLayout routingCard = card();
-        routingCard.addView(text("路由 · 配置驱动", 14, SOFT), full());
-        routeLabel = text("跟随 JSON", 24, WHITE);
-        routeLabel.setPadding(0, dp(12), 0, dp(20));
+        routingCard.addView(text("路由 · 配置驱动", 13, SOFT), full());
+        routeLabel = text("跟随 JSON", 19, WHITE);
+        routeLabel.setPadding(0, dp(8), 0, dp(12));
         routingCard.addView(routeLabel, full());
-        routingCard.addView(text("查看和编辑规则  ›", 12, SOFT), full());
+        routingCard.addView(text("查看和编辑规则  ›", 11, SOFT), full());
         routingCard.setOnClickListener(v -> selectTab(1));
         LinearLayout.LayoutParams left = new LinearLayout.LayoutParams(0, -1, 1);
         LinearLayout.LayoutParams right = new LinearLayout.LayoutParams(0, -1, 1);
-        right.leftMargin = dp(13);
+        right.leftMargin = dp(10);
         metrics.setBaselineAligned(false);
         metrics.addView(trafficCard, left);
         metrics.addView(routingCard, right);
         page.addView(metrics, full());
-        space(page, 16);
-        errorLabel = text("", 13, WHITE);
-        errorLabel.setPadding(dp(16), dp(14), dp(16), dp(14));
-        errorLabel.setBackground(round(0x33452D65, 18));
+        space(page, 12);
+        errorLabel = text("", 12, WHITE);
+        errorLabel.setPadding(dp(14), dp(11), dp(14), dp(11));
+        errorLabel.setBackground(round(0x33452D65, 16));
         errorLabel.setTextIsSelectable(true);
         page.addView(errorLabel, full());
-        space(page, 16);
+        space(page, 12);
         HorizontalScrollView shortcuts = new HorizontalScrollView(this);
         shortcuts.setHorizontalScrollBarEnabled(false);
         LinearLayout shortcutsRow = row();
@@ -405,6 +483,15 @@ public final class MainActivity extends Activity {
         }));
         page.addView(about, full());
         space(page, 16);
+        LinearLayout weatherInfo = card();
+        weatherInfo.addView(text("天气数据", 21, WHITE), full());
+        TextView weatherSource = text("天气与城市搜索来自 Open-Meteo（HTTPS，无需 API Key）。仅使用手动选择的城市坐标，不申请定位权限；同一城市最短 15 分钟刷新一次。天气主题只影响配色与图标，不代表 VPN 质量。", 14, SOFT);
+        weatherSource.setPadding(0, dp(10), 0, dp(8));
+        weatherInfo.addView(weatherSource, full());
+        weatherInfo.addView(action("刷新天气", v -> refreshWeather(true)));
+        weatherInfo.addView(action("更换城市", v -> showCityPicker()));
+        page.addView(weatherInfo, full());
+        space(page, 16);
         LinearLayout errors = card();
         errors.addView(text("最近错误", 21, WHITE), full());
         errorLabel = text("", 14, SOFT);
@@ -416,33 +503,39 @@ public final class MainActivity extends Activity {
 
     private void buildDock() {
         dock = row();
-        dock.setPadding(dp(6), dp(6), dp(6), dp(6));
-        dock.setBackground(round(0xCCE7F6FF, 48));
-        dock.setElevation(dp(8));
+        dock.setPadding(dp(T_DOCK_PAD), dp(T_DOCK_PAD), dp(T_DOCK_PAD), dp(T_DOCK_PAD));
+        dock.setBackground(round(withAlpha(theme.dockColor, 0xE6), 40));
+        dock.setElevation(dp(6));
         String[] names = {"概览", "配置", "活动", "设置"};
-        String[] symbols = {"☀", "☷", "▥", "⚙"};
+        int[] icons = {R.drawable.nav_now, R.drawable.nav_cities,
+                R.drawable.nav_activity, R.drawable.nav_settings};
         for (int i = 0; i < names.length; i++) {
             final int index = i;
             LinearLayout item = column();
             item.setGravity(Gravity.CENTER);
-            item.setPadding(dp(3), dp(6), dp(3), dp(6));
-            item.setBackground(round(i == selectedTab ? 0x6649A4F3 : Color.TRANSPARENT, 35));
-            TextView icon = text(symbols[i], 25, i == selectedTab ? 0xFF1762A0 : 0xFF16374E);
-            icon.setGravity(Gravity.CENTER);
-            TextView label = text(names[i], 11, i == selectedTab ? 0xFF1762A0 : 0xFF16374E);
+            item.setPadding(dp(3), dp(2), dp(3), dp(2));
+            item.setBackground(round(i == selectedTab ? withAlpha(theme.iconColor, 0x2E) : Color.TRANSPARENT, 30));
+            ImageView icon = new ImageView(this);
+            icon.setImageResource(icons[i]);
+            icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+            icon.setColorFilter(i == selectedTab ? theme.iconColor : withAlpha(theme.secondaryTextColor, 0xCC));
+            TextView label = text(names[i], 10, i == selectedTab ? theme.iconColor : theme.secondaryTextColor);
             label.setGravity(Gravity.CENTER);
             label.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-            item.addView(icon, new LinearLayout.LayoutParams(-1, dp(29)));
+            item.addView(icon, new LinearLayout.LayoutParams(-1, dp(22)));
             item.addView(label, full());
             item.setContentDescription(names[i]);
             item.setOnClickListener(v -> selectTab(index));
-            dock.addView(item, new LinearLayout.LayoutParams(0, dp(64), 1));
+            dock.addView(item, new LinearLayout.LayoutParams(0, dp(T_DOCK_SLOT), 1));
             tabLabels[i] = label;
             tabPills[i] = item;
+            tabIcons[i] = icon;
         }
         FrameLayout.LayoutParams dockParams = new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM);
-        dockParams.setMargins(dp(20), 0, dp(20), dp(17));
+        dockParams.setMargins(dp(16), 0, dp(16), dp(T_DOCK_MARGIN));
         root.addView(dock, dockParams);
+        int reserved = T_DOCK_SLOT + T_DOCK_PAD * 2 + T_DOCK_MARGIN + 8;
+        page.setPadding(dp(20), dp(16), dp(20), dp(reserved));
     }
 
     private void selectTab(int tab) {
@@ -470,7 +563,10 @@ public final class MainActivity extends Activity {
         String activeName = ProfileStore.activeName(this);
         if (profileLabel != null) profileLabel.setText(activeName + "  ﹀");
         if (nodeTitle != null) nodeTitle.setText(activeName);
-        if (stateLabel != null) stateLabel.setText((running ? "☀  " : "☁  ") + state);
+        if (stateLabel != null) {
+            stateLabel.setText((VpnController.running ? "● " : "○ ") + state);
+            stateLabel.setTextColor(theme.textColor);
+        }
         if (description != null) {
             if (selectedTab == 2) {
                 description.setText("下载 " + rate(VpnController.downlink) + "  ·  上传 " + rate(VpnController.uplink));
@@ -492,8 +588,30 @@ public final class MainActivity extends Activity {
                 int source = i - (6 - available);
                 long sample = source < 0 ? -1 : samples[samples.length - available + source];
                 historyLabels[i].setText(bytes(sample));
-                historyIcons[i].setText(sample < 0 ? "·" : sample == 0 ? "☀" : "☁");
-                historyIcons[i].setTextColor(sample == 0 ? 0xFFFFDF4F : WHITE);
+                historyIcons[i].setType(sample < 0 ? WeatherIconView.TYPE_UNKNOWN
+                        : sample == 0 ? WeatherIconView.TYPE_SUN
+                        : sample > 262144 ? WeatherIconView.TYPE_RAIN : WeatherIconView.TYPE_CLOUD);
+                historyIcons[i].setTint(sample == 0 ? 0xFFFFD24A : theme.secondaryTextColor);
+            }
+        }
+        if (cityLabel != null) cityLabel.setText(weatherCityName() + "  ﹀");
+        if (weatherState != null) {
+            boolean has = weatherState.hasData();
+            if (temperatureLabel != null) {
+                String stamp = has ? weatherState.updatedAt + "/" + weatherState.weatherCode + "/"
+                        + weatherState.isDay + "/" + weatherState.loading : "none";
+                boolean changed = !stamp.equals(lastWeatherStamp);
+                lastWeatherStamp = stamp;
+                temperatureLabel.setText(has ? Math.round(weatherState.temperature) + "°" : "—°");
+                conditionsLabel.setText(has ? theme.weatherNameZh + " · " + theme.weatherNameEn
+                        : weatherState.loading ? "天气加载中…" : "天气暂不可用");
+                weatherDetails.setText(has
+                        ? "体感 " + Math.round(weatherState.apparentTemperature) + "° · 降水 "
+                        + String.format(Locale.ROOT, "%.1f", weatherState.precipitation) + " mm · 风 "
+                        + Math.round(weatherState.windSpeed) + " km/h"
+                        : "无法读取天气数据，点击下方时间重试");
+                weatherUpdated.setText(has ? weatherUpdatedText() : weatherState.errorMessage);
+                if (changed) weatherIcon.setWeather(theme);
             }
         }
         if (errorLabel != null) {
@@ -809,8 +927,8 @@ public final class MainActivity extends Activity {
 
     private LinearLayout card() {
         LinearLayout card = column();
-        card.setPadding(dp(17), dp(18), dp(17), dp(20));
-        card.setBackground(round(0x29406D98, 27));
+        card.setPadding(dp(16), dp(14), dp(16), dp(14));
+        card.setBackground(round(withAlpha(theme.cardColor, 0xE8), 22));
         return card;
     }
 
@@ -831,10 +949,118 @@ public final class MainActivity extends Activity {
         TextView view = new TextView(this);
         view.setText(value);
         view.setTextSize(size);
-        view.setTextColor(color);
+        int resolved = color == WHITE ? theme.textColor : color == SOFT ? theme.secondaryTextColor : color;
+        view.setTextColor(resolved);
         view.setFontFeatureSettings("kern");
         view.setLineSpacing(dp(2), 1);
         return view;
+    }
+
+    private static int withAlpha(int color, int alpha) {
+        return (color & 0x00FFFFFF) | (alpha << 24);
+    }
+
+    private static String themeKey(WeatherTheme value) {
+        return value.type.name() + (value.isDay ? "-day" : "-night");
+    }
+
+    private String weatherCityName() {
+        WeatherService.City city = weatherService == null ? null : weatherService.getCity();
+        if (city != null) return city.displayName;
+        return weatherState == null || weatherState.city.isEmpty() ? "台北" : weatherState.city;
+    }
+
+    private String weatherUpdatedText() {
+        long age = Math.max(0L, System.currentTimeMillis() - weatherState.updatedAt);
+        String when = weatherState.stale || age >= WeatherService.MIN_REFRESH_INTERVAL_MS
+                ? "数据已过期" : "已更新";
+        return when + " · 点击刷新";
+    }
+
+    private void refreshWeather(boolean force) {
+        if (weatherService != null) weatherService.fetch(force);
+    }
+
+    private void applyWeather() {
+        WeatherTheme next = WeatherTheme.from(weatherState);
+        WeatherTheme.apply(this, root, weatherState);
+        String key = themeKey(next);
+        theme = next;
+        if (!key.equals(themeKey)) {
+            themeKey = key;
+            buildPage(); // Palette changed: rebuild so every card, dock and label picks it up.
+            return;
+        }
+        refreshStatus(); // Same palette: only refresh readings, keeping the scroll position.
+    }
+
+    private void showCityPicker() {
+        LinearLayout panel = column();
+        panel.setPadding(dp(18), dp(8), dp(18), 0);
+        EditText input = new EditText(this);
+        cityInput = input;
+        input.setHint("搜索城市，例如 台北市 / Tokyo");
+        input.setSingleLine(true);
+        panel.addView(input, full());
+        citySearchStatus = new TextView(this);
+        citySearchStatus.setTextSize(12);
+        citySearchStatus.setText("输入城市名后会自动搜索");
+        panel.addView(citySearchStatus, full());
+        cityResults = column();
+        ScrollView resultsScroll = new ScrollView(this);
+        resultsScroll.addView(cityResults, new ScrollView.LayoutParams(-1, -2));
+        panel.addView(resultsScroll, new LinearLayout.LayoutParams(-1, dp(240)));
+        input.addTextChangedListener(new android.text.TextWatcher() {
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
+            public void onTextChanged(CharSequence s, int start, int before, int count) { }
+            public void afterTextChanged(android.text.Editable s) {
+                String query = s.toString().trim();
+                if (weatherService == null) return;
+                citySearchStatus.setText(query.isEmpty() ? "输入城市名后会自动搜索" : "正在搜索…");
+                weatherService.searchCity(query);
+            }
+        });
+        cityDialog = new AlertDialog.Builder(this)
+                .setTitle("选择天气城市")
+                .setView(panel)
+                .setNegativeButton("取消", null)
+                .setNeutralButton("使用当前位置天气数据源默认城市", (dialog, which) -> {
+                    weatherService.setCity(WeatherService.DEFAULT_CITY);
+                    weatherSearchRefresh();
+                })
+                .create();
+        cityDialog.setOnDismissListener(d -> cityDialog = null);
+        cityDialog.show();
+        weatherService.searchCity(input.getText().toString());
+    }
+
+    private void weatherSearchRefresh() {
+        refreshWeather(true);
+        if (weatherState != null) applyWeather();
+    }
+
+    private void showCityResults(List<WeatherService.City> cities) {
+        if (cityResults == null || isFinishing() || isDestroyed()) return;
+        cityResults.removeAllViews();
+        if (cities == null || cities.isEmpty()) {
+            boolean emptyQuery = cityInput == null || cityInput.getText().toString().trim().isEmpty();
+            citySearchStatus.setText(emptyQuery ? "输入城市名后会自动搜索" : "没有找到匹配城市");
+            return;
+        }
+        citySearchStatus.setText("找到 " + cities.size() + " 个结果");
+        for (WeatherService.City city : cities) {
+            TextView item = text(city.displayName + (city.country.isEmpty() ? "" : " · " + city.country), 15, theme.textColor);
+            item.setPadding(dp(10), dp(12), dp(10), dp(12));
+            item.setBackground(round(withAlpha(theme.cardColor, 0xE8), 14));
+            item.setOnClickListener(v -> {
+                weatherService.setCity(city);
+                if (cityDialog != null) cityDialog.dismiss();
+                refreshWeather(true);
+            });
+            LinearLayout.LayoutParams params = full();
+            params.bottomMargin = dp(6);
+            cityResults.addView(item, params);
+        }
     }
 
     private Button action(String label, View.OnClickListener listener) {

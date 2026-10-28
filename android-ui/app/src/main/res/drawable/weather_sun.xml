@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later; original SkyBox artwork -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="64dp" android:height="64dp"
+    android:viewportWidth="64" android:viewportHeight="64">
+    <path android:fillColor="#00000000" android:strokeColor="#F5B33D"
+        android:strokeWidth="3.5" android:strokeLineCap="round"
+        android:pathData="M32,5L32,11M32,53L32,59M5,32L11,32M53,32L59,32M12.9,12.9L17.2,17.2M46.8,46.8L51.1,51.1M12.9,51.1L17.2,46.8M46.8,17.2L51.1,12.9" />
+    <path android:fillColor="#FFD166"
+        android:pathData="M48,32A16,16 0,1 1,16 32A16,16 0,1 1,48 32Z" />
+    <path android:fillColor="#FFB84D"
+        android:pathData="M19,41C27,45 41,40 46,25A16,16 0,0 1,19 41Z" />
+    <path android:fillColor="#00000000" android:strokeColor="#FFF3CC"
+        android:strokeWidth="3" android:strokeLineCap="round"
+        android:pathData="M23,29C24,25 26.5,22.5 30,22" />
+</vector>

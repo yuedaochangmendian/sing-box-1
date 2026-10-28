@@ -1,4 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        // Buildscript classpath avoids requiring the plugin marker artifact for offline builds.
+        classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:2.2.21'
+    }
+}
 plugins {
     id 'com.android.application' version '8.9.1' apply false
 }

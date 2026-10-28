@@ -2,7 +2,7 @@
 
 ## SkyBox Android ARM64
 
-本分支在 reF1nd 的 `reF1nd-testing` 内核上加入天气主题 Android 客户端 **SkyBox v1.1.0**（versionCode 2），使用原创蓝天、太阳与云朵图标及 24dp 原生线性导航图标。
+本分支在 reF1nd 的 `reF1nd-testing` 内核上加入天气主题 Android 客户端 **SkyBox v1.2.0**（versionCode 3，纯 Kotlin 原生 View 实现），使用原创蓝天、太阳与云朵图标及 24dp 原生线性导航图标。
 Android 工程与构建说明见 [`android-ui/BUILDING.md`](android-ui/BUILDING.md)。支持私有 JSON 配置管理、系统 VPN 授权与连接、实时流量及日志；ABI 为 `arm64-v8a`，最低 Android 7.0（API 24）。
 
 天气通过 **Open-Meteo HTTPS** 获取，城市由用户手动选择，无需 API key，不申请定位权限。天气数据按 **15 分钟**间隔刷新；应用挂起或离线时不保证准点更新。天气主题及天气读数与 **真实 VPN 状态分离**：晴雨、温度或天气请求成功均不表示 VPN 已连接，连接状态、流量和日志仍以系统 VPN 授权与 sing-box 内核实际状态为准。

@@ -13,7 +13,8 @@ SkyBox 是基于 reF1nd/sing-box 的独立 Android 客户端，采用蓝色渐�
 ## 工具链与构建
 
 - Go 1.25.5、sagernet gomobile/gobind v0.1.12。
-- JDK 21（Java 源码目标 17）、Gradle 8.12、AGP 8.9.1。
+- JDK 21（Java/Kotlin 字节码目标 17）、Kotlin 2.2.21、Gradle 8.12、AGP 8.9.1。
+- 应用源码为纯 Kotlin（`app/src/main/java/**/*.kt`，Kotlin 插件默认把该目录视为源码根）。Kotlin 插件通过根 `build.gradle` 的 `buildscript` classpath 引入，避免离线构建解析插件 marker；依赖完整缓存后可直接 `--offline` 构建。
 - Android SDK Platform 24（gomobile）和 35（应用）、Build Tools 35.0.0、NDK 28.2.13676358。
 
 从仓库根目录，在 Bash 中设置本机路径后执行：
@@ -40,6 +41,12 @@ GitHub Actions 工作流 **SkyBox Android ARM64**（`.github/workflows/skybox-an
 APK 构建、Android Lint、签名与 ZIP/ABI 检查结果以本次交付说明为准。未连接 ARM64 Android 真机时，不能声称已经验证系统 VPN 授权、实际代理联网或像素级截图还原。
 
 本项目与内核遵循根目录 `../LICENSE` 的 GPL-3.0-or-later 及相关命名/归属说明。sing-box Copyright (C) 2022 nekohasekai；SkyBox 为独立衍生客户端，不代表 SagerNet 官方或上游背书。分发 APK 应同时提供对应分支源码、许可证及依赖许可。
+
+## v1.2.0 Kotlin 迁移说明
+
+- 应用代码（界面、VPN 服务、配置存储、天气数据/主题/图标）已全部由 Java 迁移为 Kotlin，行为保持不变；`libbox.aar` 仍提供 Java 接口，`VpnController` 继续实现 `PlatformInterface` 等接口。
+- `VpnController` 的静态状态（`running/state/error/downlink/...`）与 action 常量保留为 Java 可见的静态字段（`@JvmField`），`ProfileStore`、`CoreRuntime`、`LatencyProbe` 为 Kotlin `object`，Manifest 与通知点击逻辑无需改动。
+- 顺带修复审查发现的三项问题：天气快照与 15 分钟限流改为持久化（Activity 重建后不再立即重发请求并保留上次读数）；切换页签后天气图标不再回落为未知图标；有缓存数据时刷新失败会显示具体错误而不是仅显示“已过期”。
 
 ## v1.1.0 天气数据与状态说明
 

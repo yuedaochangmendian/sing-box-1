@@ -1,9 +1,25 @@
 package io.github.yuedaochangmendian.skybox
 
 /**
+ * One day of the forecast. label is already localized (今天/明天/周五), max/min are Celsius.
+ * weatherCode is the WMO code for the day; -1 means the provider returned no value.
+ */
+class DailyForecast(
+    val label: String,
+    val weatherCode: Int,
+    val max: Double,
+    val min: Double,
+) {
+    fun isValid(): Boolean = max.isFinite() && min.isFinite() && max >= min
+}
+
+/**
  * Immutable weather snapshot. Temperatures are Celsius, precipitation is mm and wind is km/h.
  * Missing measurements are Double.NaN; updatedAt is the last successful fetch time (epoch ms),
  * or zero before the first success. An error never discards the last successful measurements.
+ *
+ * [precipitation15] holds the provider's 15-minute precipitation nowcast (8 entries = 2 hours),
+ * [daily] the next few days, and [aqi]/[aqiLabel] the US AQI value with its Chinese band name.
  */
 class WeatherState(
     val city: String,
@@ -21,14 +37,22 @@ class WeatherState(
     val error: Boolean,
     val loading: Boolean,
     val errorMessage: String = "",
+    val daily: List<DailyForecast> = emptyList(),
+    val precipitation15: List<Double> = emptyList(),
+    val aqi: Double = Double.NaN,
+    val aqiLabel: String = "",
 ) {
     fun hasData(): Boolean = updatedAt > 0L && !temperature.isNaN() && !temperature.isInfinite()
+
+    fun todayMax(): Double = daily.firstOrNull()?.max ?: Double.NaN
+
+    fun todayMin(): Double = daily.firstOrNull()?.min ?: Double.NaN
 
     fun withStatus(stale: Boolean, error: Boolean, loading: Boolean, message: String): WeatherState =
         WeatherState(
             city, country, latitude, longitude, temperature, apparentTemperature,
             precipitation, windSpeed, weatherCode, isDay, updatedAt,
-            stale, error, loading, message,
+            stale, error, loading, message, daily, precipitation15, aqi, aqiLabel,
         )
 
     companion object {

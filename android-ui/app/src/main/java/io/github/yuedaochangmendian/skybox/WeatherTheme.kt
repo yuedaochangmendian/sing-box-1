@@ -150,15 +150,15 @@ class WeatherTheme private constructor(
         private fun palette(type: Type, day: Boolean): IntArray {
             if (!day) {
                 return when (type) {
-                    Type.CLEAR -> intArrayOf(0xFF101C40.toInt(), 0xFF263D66.toInt(), 0xFF344C70.toInt())
-                    Type.PARTLY_CLOUDY -> intArrayOf(0xFF18243C.toInt(), 0xFF2A3E59.toInt(), 0xFF3C526E.toInt())
-                    Type.CLOUDY -> intArrayOf(0xFF222C3D.toInt(), 0xFF354257.toInt(), 0xFF46576C.toInt())
-                    Type.FOG -> intArrayOf(0xFF26343D.toInt(), 0xFF394C57.toInt(), 0xFF4D626C.toInt())
+                    Type.CLEAR -> intArrayOf(0xFF0A1330.toInt(), 0xFF1A2A4E.toInt(), 0xFF2A3C5E.toInt())
+                    Type.PARTLY_CLOUDY -> intArrayOf(0xFF0F1A30.toInt(), 0xFF1F2F4A.toInt(), 0xFF31435D.toInt())
+                    Type.CLOUDY -> intArrayOf(0xFF181F2D.toInt(), 0xFF283140.toInt(), 0xFF38434F.toInt())
+                    Type.FOG -> intArrayOf(0xFF1D2830.toInt(), 0xFF2D3C46.toInt(), 0xFF3F4F59.toInt())
                     Type.DRIZZLE, Type.RAIN ->
-                        intArrayOf(0xFF112B3C.toInt(), 0xFF254657.toInt(), 0xFF3A5C6C.toInt())
-                    Type.SNOW -> intArrayOf(0xFF243148.toInt(), 0xFF384D65.toInt(), 0xFF4B6278.toInt())
-                    Type.THUNDERSTORM -> intArrayOf(0xFF201B37.toInt(), 0xFF37304C.toInt(), 0xFF4B4360.toInt())
-                    else -> intArrayOf(0xFF1C293A.toInt(), 0xFF2F4055.toInt(), 0xFF42566A.toInt())
+                        intArrayOf(0xFF0E1826.toInt(), 0xFF1B2A3E.toInt(), 0xFF2A3B50.toInt())
+                    Type.SNOW -> intArrayOf(0xFF19222F.toInt(), 0xFF2A3749.toInt(), 0xFF3C4C60.toInt())
+                    Type.THUNDERSTORM -> intArrayOf(0xFF141127.toInt(), 0xFF241F35.toInt(), 0xFF35304A.toInt())
+                    else -> intArrayOf(0xFF151E2B.toInt(), 0xFF24313F.toInt(), 0xFF34424F.toInt())
                 }
             }
             return when (type) {

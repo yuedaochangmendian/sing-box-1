@@ -276,6 +276,10 @@ class WeatherService(context: Context, callback: Callback) : AutoCloseable {
                     "current",
                     "temperature_2m,apparent_temperature,precipitation,wind_speed_10m,weather_code,is_day",
                 )
+                .appendQueryParameter("daily", "weather_code,temperature_2m_max,temperature_2m_min")
+                .appendQueryParameter("forecast_days", "4")
+                .appendQueryParameter("minutely_15", "precipitation")
+                .appendQueryParameter("forecast_minutely_15", "8")
                 .appendQueryParameter("temperature_unit", "celsius")
                 .appendQueryParameter("wind_speed_unit", "kmh")
                 .appendQueryParameter("precipitation_unit", "mm")
@@ -291,11 +295,16 @@ class WeatherService(context: Context, callback: Callback) : AutoCloseable {
             ) {
                 throw JSONException("天气字段无效")
             }
+            val daily = parseDaily(document)
+            val nowcast = parseNowcast(document)
+            // Air quality is a separate, optional endpoint: its failure must not hide the weather.
+            val air = loadAirQuality(request, target)
             val result = WeatherState(
                 target.displayName, target.country, target.latitude, target.longitude,
                 number(current, "temperature_2m"), number(current, "apparent_temperature"),
                 rain, wind, code.toInt(), day == 1.0, System.currentTimeMillis(),
-                false, false, false,
+                false, false, false, "",
+                daily, nowcast, air.first, air.second,
             )
             val zone = document.optString("timezone", target.timezone)
             val resolved = City(
@@ -320,6 +329,60 @@ class WeatherService(context: Context, callback: Callback) : AutoCloseable {
                 // onWeather may synchronously close the service or change the city.
                 if (active(request, false)) callback?.onError(message, false)
             }
+        }
+    }
+
+    /** Parses `daily`; a malformed day is skipped instead of failing the whole reading. */
+    private fun parseDaily(document: JSONObject): List<DailyForecast> {
+        val daily = document.optJSONObject("daily") ?: return emptyList()
+        val times = daily.optJSONArray("time") ?: return emptyList()
+        val codes = daily.optJSONArray("weather_code")
+        val maxima = daily.optJSONArray("temperature_2m_max")
+        val minima = daily.optJSONArray("temperature_2m_min")
+        if (codes == null || maxima == null || minima == null) return emptyList()
+        val count = minOf(times.length(), codes.length(), maxima.length(), minima.length(), 4)
+        val result = ArrayList<DailyForecast>(count)
+        for (i in 0 until count) {
+            val max = maxima.optDouble(i, Double.NaN)
+            val min = minima.optDouble(i, Double.NaN)
+            if (!max.isFinite() || !min.isFinite() || max < min) continue
+            val rawCode = codes.optDouble(i, -1.0)
+            val code = if (rawCode.isFinite()) rawCode.toInt() else -1
+            result.add(DailyForecast(dayLabel(times.optString(i, ""), i), code, max, min))
+        }
+        return result
+    }
+
+    /** Parses the 15-minute nowcast; values are mm per 15 minutes and never negative. */
+    private fun parseNowcast(document: JSONObject): List<Double> {
+        val section = document.optJSONObject("minutely_15") ?: return emptyList()
+        val values = section.optJSONArray("precipitation") ?: return emptyList()
+        val result = ArrayList<Double>(values.length())
+        for (i in 0 until values.length()) {
+            val value = values.optDouble(i, 0.0)
+            result.add(if (value.isFinite() && value > 0) value else 0.0)
+        }
+        return result
+    }
+
+    /**
+     * Optional US AQI lookup. Returns (value, band) or (NaN, "") when the endpoint is unavailable,
+     * so a missing air-quality reading never turns into a weather failure.
+     */
+    private fun loadAirQuality(request: Request, target: City): Pair<Double, String> {
+        return try {
+            val uri = Uri.parse("https://air-quality-api.open-meteo.com/v1/air-quality").buildUpon()
+                .appendQueryParameter("latitude", target.latitude.toString())
+                .appendQueryParameter("longitude", target.longitude.toString())
+                .appendQueryParameter("current", "us_aqi")
+                .appendQueryParameter("timezone", target.timezone).build()
+            val document = getJson(uri.toString(), request)
+            val value = number(document.getJSONObject("current"), "us_aqi")
+            if (!value.isFinite() || value < 0) Pair(Double.NaN, "") else Pair(value, aqiBand(value))
+        } catch (error: InterruptedIOException) {
+            throw error
+        } catch (ignored: Exception) {
+            Pair(Double.NaN, "")
         }
     }
 
@@ -473,6 +536,7 @@ class WeatherService(context: Context, callback: Callback) : AutoCloseable {
             .putInt(SNAPSHOT_WEATHER_CODE, value.weatherCode)
             .putBoolean(SNAPSHOT_IS_DAY, value.isDay)
             .putLong(SNAPSHOT_UPDATED_AT, value.updatedAt)
+            .putString(SNAPSHOT_EXTRAS, encodeExtras(value))
             .apply()
     }
 
@@ -506,11 +570,13 @@ class WeatherService(context: Context, callback: Callback) : AutoCloseable {
                 clearSnapshot()
                 return null
             }
+            val extras = decodeExtras(preferences.getString(SNAPSHOT_EXTRAS, "") ?: "")
             WeatherState(
                 preferences.getString(SNAPSHOT_CITY, "").orEmpty(),
                 preferences.getString(SNAPSHOT_COUNTRY, "").orEmpty(),
                 latitude, longitude, temperature, apparent, precipitation, wind, code,
                 preferences.getBoolean(SNAPSHOT_IS_DAY, true), updatedAt, false, false, false,
+                "", extras.daily, extras.nowcast, extras.aqi, extras.aqiLabel,
             )
         } catch (ignored: RuntimeException) {
             // A malformed record must never break construction or the first fetch.
@@ -526,7 +592,7 @@ class WeatherService(context: Context, callback: Callback) : AutoCloseable {
             .remove(SNAPSHOT_TEMPERATURE).remove(SNAPSHOT_APPARENT_TEMPERATURE)
             .remove(SNAPSHOT_PRECIPITATION).remove(SNAPSHOT_WIND_SPEED)
             .remove(SNAPSHOT_WEATHER_CODE).remove(SNAPSHOT_IS_DAY)
-            .remove(SNAPSHOT_UPDATED_AT)
+            .remove(SNAPSHOT_UPDATED_AT).remove(SNAPSHOT_EXTRAS)
             .apply()
     }
 
@@ -559,8 +625,98 @@ class WeatherService(context: Context, callback: Callback) : AutoCloseable {
             city.displayName, city.country, city.latitude, city.longitude,
             value.temperature, value.apparentTemperature, value.precipitation, value.windSpeed,
             value.weatherCode, value.isDay, value.updatedAt, value.stale, value.error, false,
-            value.errorMessage,
+            value.errorMessage, value.daily, value.precipitation15, value.aqi, value.aqiLabel,
         )
+
+        /** 今天/明天 for the first two entries, then the localized weekday of the returned date. */
+        private fun dayLabel(date: String, index: Int): String {
+            if (index == 0) return "今天"
+            if (index == 1) return "明天"
+            val weekday = try {
+                val parsed = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.ROOT).parse(date)
+                if (parsed == null) -1 else {
+                    val calendar = java.util.Calendar.getInstance()
+                    calendar.time = parsed
+                    calendar.get(java.util.Calendar.DAY_OF_WEEK)
+                }
+            } catch (ignored: Exception) {
+                -1
+            }
+            val names = arrayOf("周日", "周一", "周二", "周三", "周四", "周五", "周六")
+            return if (weekday in 1..7) names[weekday - 1] else "第 " + (index + 1) + " 天"
+        }
+
+        private fun aqiBand(value: Double): String = when {
+            value <= 50 -> "优"
+            value <= 100 -> "良"
+            value <= 150 -> "轻度污染"
+            value <= 200 -> "中度污染"
+            value <= 300 -> "重度污染"
+            else -> "严重污染"
+        }
+
+        /** Serializes the optional sections (forecast/nowcast/AQI) into one preference string. */
+        private fun encodeExtras(value: WeatherState): String = try {
+            val root = JSONObject()
+            val days = JSONArray()
+            for (day in value.daily) {
+                days.put(
+                    JSONObject().put("l", day.label).put("c", day.weatherCode)
+                        .put("x", day.max).put("n", day.min),
+                )
+            }
+            root.put("daily", days)
+            val nowcast = JSONArray()
+            for (millimetres in value.precipitation15) nowcast.put(millimetres)
+            root.put("now", nowcast)
+            if (value.aqi.isFinite()) root.put("aqi", value.aqi)
+            root.put("band", value.aqiLabel)
+            root.toString()
+        } catch (ignored: JSONException) {
+            ""
+        }
+
+        private class Extras(
+            val daily: List<DailyForecast>,
+            val nowcast: List<Double>,
+            val aqi: Double,
+            val aqiLabel: String,
+        )
+
+        /** A malformed record degrades to empty sections; the base reading stays usable. */
+        private fun decodeExtras(raw: String): Extras {
+            if (raw.isEmpty()) return Extras(emptyList(), emptyList(), Double.NaN, "")
+            return try {
+                val root = JSONObject(raw)
+                val daily = ArrayList<DailyForecast>()
+                val days = root.optJSONArray("daily")
+                if (days != null) {
+                    for (i in 0 until days.length()) {
+                        val item = days.optJSONObject(i) ?: continue
+                        val day = DailyForecast(
+                            item.optString("l", ""), item.optInt("c", -1),
+                            item.optDouble("x", Double.NaN), item.optDouble("n", Double.NaN),
+                        )
+                        if (day.isValid()) daily.add(day)
+                    }
+                }
+                val nowcast = ArrayList<Double>()
+                val values = root.optJSONArray("now")
+                if (values != null) {
+                    for (i in 0 until values.length()) {
+                        val millimetres = values.optDouble(i, 0.0)
+                        nowcast.add(if (millimetres.isFinite() && millimetres > 0) millimetres else 0.0)
+                    }
+                }
+                val aqi = root.optDouble("aqi", Double.NaN)
+                Extras(
+                    daily, nowcast, if (aqi.isFinite()) aqi else Double.NaN,
+                    root.optString("band", ""),
+                )
+            } catch (ignored: JSONException) {
+                Extras(emptyList(), emptyList(), Double.NaN, "")
+            }
+        }
 
         private fun aged(value: WeatherState): WeatherState {
             val age = System.currentTimeMillis() - value.updatedAt
@@ -621,3 +777,4 @@ private const val SNAPSHOT_WIND_SPEED = "snapshot_wind_speed"
 private const val SNAPSHOT_WEATHER_CODE = "snapshot_weather_code"
 private const val SNAPSHOT_IS_DAY = "snapshot_is_day"
 private const val SNAPSHOT_UPDATED_AT = "snapshot_updated_at"
+private const val SNAPSHOT_EXTRAS = "snapshot_extras"

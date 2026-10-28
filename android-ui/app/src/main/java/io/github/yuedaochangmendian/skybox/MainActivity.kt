@@ -21,6 +21,10 @@ import android.provider.OpenableColumns
 import android.text.Editable
 import android.text.InputFilter
 import android.text.InputType
+import android.text.Spannable
+import android.text.SpannableString
+import android.text.style.RelativeSizeSpan
+import android.text.style.SuperscriptSpan
 import android.text.TextUtils
 import android.text.TextWatcher
 import android.view.Gravity
@@ -52,6 +56,25 @@ class MainActivity : Activity() {
     private lateinit var scroll: ScrollView
     private lateinit var page: LinearLayout
     private lateinit var dock: LinearLayout
+    private lateinit var backdrop: SkyBackdropView
+    private lateinit var panel: FrameLayout
+    private lateinit var weatherScroll: ScrollView
+    private lateinit var floatLeft: View
+    private lateinit var floatRight: View
+
+    private var panelOpen = false
+    private var cityTitle: TextView? = null
+    private var citySubtitle: TextView? = null
+    private var bigTemp: TextView? = null
+    private var conditionLine: TextView? = null
+    private var aqiPillText: TextView? = null
+    private var precipSentence: TextView? = null
+    private var precipChart: PrecipitationChartView? = null
+    private var precipEmpty: TextView? = null
+    private var forecastRows: LinearLayout? = null
+    private var forecastCard: LinearLayout? = null
+    private var weatherError: TextView? = null
+    private var renderedWeather = ""
 
     private val handler = Handler(Looper.getMainLooper())
     private val worker: ExecutorService = Executors.newSingleThreadExecutor()
@@ -73,13 +96,6 @@ class MainActivity : Activity() {
     private var weatherState: WeatherState? = null
     private var theme: WeatherTheme = WeatherTheme.from(null)
     private var themeKey = ""
-    private var lastWeatherStamp = ""
-    private var cityLabel: TextView? = null
-    private var temperatureLabel: TextView? = null
-    private var conditionsLabel: TextView? = null
-    private var weatherDetails: TextView? = null
-    private var weatherUpdated: TextView? = null
-    private var weatherIcon: WeatherIconView? = null
     private var cityDialog: AlertDialog? = null
     private var cityResults: LinearLayout? = null
     private var cityInput: EditText? = null
@@ -141,6 +157,17 @@ class MainActivity : Activity() {
             root.setPadding(left, top, right, bottom)
             insets
         }
+        backdrop = SkyBackdropView(this)
+        root.addView(backdrop, FrameLayout.LayoutParams(-1, -1))
+        weatherScroll = ScrollView(this)
+        weatherScroll.isFillViewport = true
+        weatherScroll.isVerticalScrollBarEnabled = false
+        weatherScroll.clipToPadding = false
+        root.addView(weatherScroll, FrameLayout.LayoutParams(-1, -1))
+        panel = FrameLayout(this)
+        panel.visibility = View.GONE
+        root.addView(panel, FrameLayout.LayoutParams(-1, -1))
+        buildFloatingButtons()
         setContentView(root)
         root.requestApplyInsets()
         val service = WeatherService(this, object : WeatherService.Callback {
@@ -164,7 +191,9 @@ class MainActivity : Activity() {
         theme = WeatherTheme.from(weatherState)
         themeKey = themeKeyOf(theme)
         WeatherTheme.apply(this, root, weatherState)
-        buildPage()
+        backdrop.setTheme(theme)
+        buildWeatherScreen()
+        buildPanel()
         worker.execute {
             try {
                 CoreRuntime.ensureInit(applicationContext)
@@ -208,7 +237,7 @@ class MainActivity : Activity() {
         super.onDestroy()
     }
 
-    private fun buildPage() {
+    private fun buildPanel() {
         profileLabel = null
         nodeTitle = null
         stateLabel = null
@@ -220,31 +249,24 @@ class MainActivity : Activity() {
         versionLabel = null
         latencyLabel = null
         latencyHint = null
-        cityLabel = null
-        temperatureLabel = null
-        conditionsLabel = null
-        weatherDetails = null
-        weatherUpdated = null
-        weatherIcon = null
         connectionSwitch = null
         historyLabels = null
         historyIcons = null
-        // A rebuilt page holds a fresh, unknown icon; force the next status refresh to paint it.
-        lastWeatherStamp = ""
         tabIcons.fill(null)
         tabLabels.fill(null)
         tabPills.fill(null)
         themedCards.clear()
         themedPills.clear()
-        root.removeAllViews()
+        panel.removeAllViews()
+        panel.background = theme.newBackground()
         scroll = ScrollView(this)
         scroll.setFillViewport(true)
         scroll.setClipToPadding(false)
         scroll.setVerticalScrollBarEnabled(false)
         page = column()
-        page.setPadding(dp(20), dp(16), dp(20), dp(118))
+        page.setPadding(dp(20), dp(52), dp(20), dp(118))
         scroll.addView(page, FrameLayout.LayoutParams(-1, -2))
-        root.addView(scroll, FrameLayout.LayoutParams(-1, -1))
+        panel.addView(scroll, FrameLayout.LayoutParams(-1, -1))
         when (selectedTab) {
             0 -> buildOverview()
             1 -> buildProfiles()
@@ -252,22 +274,269 @@ class MainActivity : Activity() {
             else -> buildSettings()
         }
         buildDock()
+        buildPanelClose()
         refreshStatus()
     }
 
+    /** Circular ✕ over the panel; the system back gesture closes it as well. */
+    private fun buildPanelClose() {
+        val close = text("✕", 17f, WHITE)
+        close.setGravity(Gravity.CENTER)
+        close.background = RippleDrawable(
+            ColorStateList.valueOf(0x33FFFFFF),
+            round(withAlpha(theme.cardColor, 0xCC), 20),
+            round(WHITE, 20),
+        )
+        close.contentDescription = "关闭配置面板"
+        close.setOnClickListener { closePanel() }
+        val params = FrameLayout.LayoutParams(dp(40), dp(40), Gravity.TOP or Gravity.END)
+        params.topMargin = dp(14)
+        params.rightMargin = dp(18)
+        panel.addView(close, params)
+    }
+
+    private fun openPanel() {
+        panelOpen = true
+        panel.visibility = View.VISIBLE
+        floatLeft.visibility = View.GONE
+        floatRight.visibility = View.GONE
+        buildPanel()
+    }
+
+    private fun closePanel() {
+        panelOpen = false
+        panel.visibility = View.GONE
+        floatLeft.visibility = View.VISIBLE
+        floatRight.visibility = View.VISIBLE
+    }
+
+    override fun onBackPressed() {
+        if (panelOpen) {
+            closePanel()
+            return
+        }
+        super.onBackPressed()
+    }
+
+    private fun buildFloatingButtons() {
+        val size = dp(56)
+        val ripple = ColorStateList.valueOf(0x33FFFFFF)
+        val left = ImageView(this)
+        left.setImageResource(R.drawable.ic_panel)
+        left.scaleType = ImageView.ScaleType.CENTER
+        left.setColorFilter(theme.iconColor)
+        left.background = RippleDrawable(ripple, oval(withAlpha(theme.cardColor, 0xD9)), oval(WHITE))
+        left.contentDescription = "打开配置与设置"
+        left.setOnClickListener { openPanel() }
+        val leftParams = FrameLayout.LayoutParams(size, size, Gravity.BOTTOM or Gravity.START)
+        leftParams.leftMargin = dp(20)
+        leftParams.bottomMargin = dp(22)
+        root.addView(left, leftParams)
+        floatLeft = left
+
+        val right = ImageView(this)
+        right.setImageResource(R.drawable.ic_add)
+        right.scaleType = ImageView.ScaleType.CENTER
+        right.setColorFilter(theme.iconColor)
+        right.background = RippleDrawable(ripple, oval(withAlpha(theme.cardColor, 0xD9)), oval(WHITE))
+        right.contentDescription = "添加配置"
+        right.setOnClickListener { showAddProfileMenu() }
+        val rightParams = FrameLayout.LayoutParams(size, size, Gravity.BOTTOM or Gravity.END)
+        rightParams.rightMargin = dp(20)
+        rightParams.bottomMargin = dp(22)
+        root.addView(right, rightParams)
+        floatRight = right
+    }
+
+    private fun paintFloatingButtons() {
+        val ripple = ColorStateList.valueOf(0x33FFFFFF)
+        val surface = oval(withAlpha(theme.cardColor, 0xD9))
+        floatLeft.background = RippleDrawable(ripple, surface, oval(WHITE))
+        floatRight.background = RippleDrawable(ripple, oval(withAlpha(theme.cardColor, 0xD9)), oval(WHITE))
+    }
+
+    /** Bottom-right ＋: the same two entry points as the profile page, without leaving the sky. */
+    private fun showAddProfileMenu() {
+        AlertDialog.Builder(this)
+            .setTitle("添加配置")
+            .setItems(arrayOf("从文件导入 JSON", "新建空白配置")) { _, which ->
+                if (which == 0) {
+                    importDocument()
+                } else {
+                    openPanel()
+                    selectTab(1)
+                    showEditor(
+                        null,
+                        "新配置",
+                        "{\n  \"log\": {\n    \"level\": \"info\"\n  },\n  \"inbounds\": [],\n  \"outbounds\": []\n}",
+                    )
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun buildWeatherScreen() {
+        cityTitle = null
+        citySubtitle = null
+        bigTemp = null
+        conditionLine = null
+        aqiPillText = null
+        precipSentence = null
+        precipChart = null
+        precipEmpty = null
+        forecastRows = null
+        forecastCard = null
+        weatherError = null
+        renderedWeather = ""
+        val content = column()
+        content.setPadding(dp(16), dp(22), dp(16), dp(148))
+        weatherScroll.removeAllViews()
+        weatherScroll.addView(content, FrameLayout.LayoutParams(-1, -2))
+
+        val title = text(weatherCityName(), 25f, WHITE)
+        title.setTypeface(Typeface.DEFAULT, Typeface.BOLD)
+        title.setSingleLine(true)
+        title.ellipsize = TextUtils.TruncateAt.END
+        cityTitle = title
+        content.addView(title, full())
+
+        val subtitle = text("手动选择城市，获取当地天气  ›", 13f, withAlpha(theme.secondaryTextColor, 0xD0))
+        subtitle.setPadding(0, dp(7), 0, 0)
+        subtitle.contentDescription = "选择天气城市"
+        subtitle.setOnClickListener { showCityPicker() }
+        citySubtitle = subtitle
+        content.addView(subtitle, full())
+
+        space(content, 12)
+        val reading = LinearLayout(this)
+        reading.orientation = LinearLayout.HORIZONTAL
+        reading.gravity = Gravity.TOP
+        val temperature = text("—", 104f, WHITE)
+        temperature.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL))
+        temperature.setIncludeFontPadding(false)
+        bigTemp = temperature
+        reading.addView(temperature, LinearLayout.LayoutParams(-2, -2))
+        content.addView(reading, full())
+
+        val conditions = text("天气加载中…", 16f, withAlpha(theme.textColor, 0xE6))
+        conditions.setPadding(0, dp(2), 0, 0)
+        conditionLine = conditions
+        content.addView(conditions, full())
+
+        val error = text("", 12f, withAlpha(theme.textColor, 0xCC))
+        error.setPadding(0, dp(6), 0, 0)
+        error.visibility = View.GONE
+        weatherError = error
+        content.addView(error, full())
+
+        space(content, 14)
+        val pills = row()
+        val air = pill(R.drawable.ic_leaf, "空气质量 —")
+        air.setOnClickListener { showAirQuality() }
+        aqiPillText = air.getChildAt(1) as TextView
+        pills.addView(air, LinearLayout.LayoutParams(-2, dp(40)))
+        val forecastPill = pill(R.drawable.ic_play, "天气预报")
+        forecastPill.setOnClickListener {
+            val target = forecastCard
+            if (target != null) weatherScroll.smoothScrollTo(0, Math.max(0, target.top - dp(24)))
+        }
+        val forecastParams = LinearLayout.LayoutParams(-2, dp(40))
+        forecastParams.leftMargin = dp(10)
+        pills.addView(forecastPill, forecastParams)
+        content.addView(pills, full())
+
+        space(content, 72)
+        val precip = glassCard()
+        val sentence = text("正在读取降水预报…", 15f, theme.textColor)
+        precipSentence = sentence
+        precip.addView(sentence, full())
+        val chartRow = row()
+        chartRow.setPadding(0, dp(12), 0, 0)
+        val chart = PrecipitationChartView(this)
+        chart.setBarColors(0xF2BEE5FF.toInt(), 0x8C7FBDF0.toInt())
+        chart.setGridColor(withAlpha(theme.textColor, 0x26))
+        precipChart = chart
+        chartRow.addView(chart, LinearLayout.LayoutParams(0, dp(92), 1f))
+        val axis = column()
+        axis.setGravity(Gravity.CENTER_VERTICAL)
+        for (label in arrayOf("大", "中", "小")) {
+            val tick = text(label, 11f, withAlpha(theme.secondaryTextColor, 0xAA))
+            tick.setGravity(Gravity.CENTER)
+            axis.addView(tick, LinearLayout.LayoutParams(-1, 0, 1f))
+        }
+        val axisParams = LinearLayout.LayoutParams(dp(26), dp(92))
+        axisParams.leftMargin = dp(6)
+        chartRow.addView(axis, axisParams)
+        precip.addView(chartRow, full())
+        val timeline = row()
+        timeline.setPadding(0, dp(8), dp(32), 0)
+        val marks = arrayOf("现在", "1小时后", "2小时后")
+        val gravities = intArrayOf(Gravity.START, Gravity.CENTER, Gravity.END)
+        for (i in marks.indices) {
+            val mark = text(marks[i], 11f, withAlpha(theme.secondaryTextColor, 0xCC))
+            mark.setGravity(gravities[i])
+            timeline.addView(mark, LinearLayout.LayoutParams(0, -2, 1f))
+        }
+        precip.addView(timeline, full())
+        val empty = text("", 12f, withAlpha(theme.secondaryTextColor, 0xCC))
+        empty.setPadding(0, dp(8), 0, 0)
+        empty.visibility = View.GONE
+        precipEmpty = empty
+        precip.addView(empty, full())
+        content.addView(precip, full())
+
+        space(content, 14)
+        val forecast = glassCard()
+        forecast.setPadding(dp(16), dp(6), dp(16), dp(6))
+        val rows = column()
+        forecastRows = rows
+        forecast.addView(rows, full())
+        forecastCard = forecast
+        content.addView(forecast, full())
+    }
+
+    private fun pill(iconRes: Int, label: String): LinearLayout {
+        val container = LinearLayout(this)
+        container.orientation = LinearLayout.HORIZONTAL
+        container.gravity = Gravity.CENTER_VERTICAL
+        container.setPadding(dp(14), 0, dp(16), 0)
+        container.background = RippleDrawable(
+            ColorStateList.valueOf(0x33FFFFFF),
+            round(withAlpha(theme.cardColor, 0xC4), 20),
+            round(WHITE, 20),
+        )
+        val icon = ImageView(this)
+        icon.setImageResource(iconRes)
+        icon.setColorFilter(theme.textColor)
+        container.addView(icon, LinearLayout.LayoutParams(dp(15), dp(15)))
+        val value = text(label, 14f, WHITE)
+        val params = LinearLayout.LayoutParams(-2, -2)
+        params.leftMargin = dp(7)
+        container.addView(value, params)
+        return container
+    }
+
+    /** Translucent rounded card used by the sky screen (lighter than the control panel cards). */
+    private fun glassCard(): LinearLayout {
+        val container = column()
+        container.setPadding(dp(16), dp(15), dp(16), dp(15))
+        container.background = round(withAlpha(theme.cardColor, 0xB8), 22)
+        return container
+    }
+
+    private fun oval(color: Int): GradientDrawable {
+        val background = GradientDrawable()
+        background.shape = GradientDrawable.OVAL
+        background.setColor(color)
+        return background
+    }
+
     private fun buildOverview() {
-        val top = row()
-        val city = text(weatherCityName() + "  ﹀", 16f, WHITE)
-        city.setSingleLine(true)
-        city.ellipsize = TextUtils.TruncateAt.END
-        city.setTypeface(Typeface.DEFAULT, Typeface.BOLD)
-        city.setPadding(dp(16), dp(13), dp(12), dp(13))
-        city.background = round(0x24FFFFFF, 32)
-        city.contentDescription = "选择天气城市"
-        city.setOnClickListener { showCityPicker() }
-        cityLabel = city
-        themedPills.add(city)
-        top.addView(city, LinearLayout.LayoutParams(0, T_PILL, 1f))
+        val head = row()
+        val title = text("控制", 30f, WHITE)
+        title.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL))
+        head.addView(title, LinearLayout.LayoutParams(0, -2, 1f))
         val toggle = Switch(this)
         toggle.setText("Off  ")
         toggle.setTextColor(WHITE)
@@ -287,41 +556,15 @@ class MainActivity : Activity() {
         }
         connectionSwitch = toggle
         themedPills.add(toggle)
-        val toggleParams = LinearLayout.LayoutParams(-2, T_PILL)
-        toggleParams.leftMargin = dp(12)
-        top.addView(toggle, toggleParams)
-        page.addView(top)
-        space(page, 18)
-        val weather = row()
-        weather.setGravity(Gravity.CENTER)
-        val icon = WeatherIconView(this)
-        icon.contentDescription = "当前天气"
-        weatherIcon = icon
-        weather.addView(icon, LinearLayout.LayoutParams(dp(72), dp(72)))
-        val weatherText = column()
-        weatherText.setPadding(dp(14), 0, 0, 0)
-        val temperature = text("—°", 46f, WHITE)
-        temperature.setTypeface(Typeface.create("sans-serif-thin", Typeface.NORMAL))
-        temperature.setIncludeFontPadding(false)
-        temperatureLabel = temperature
-        weatherText.addView(temperature, full())
-        val conditions = text("天气加载中…", 15f, SOFT)
-        conditionsLabel = conditions
-        weatherText.addView(conditions, full())
-        weather.addView(weatherText, LinearLayout.LayoutParams(0, -2, 1f))
-        page.addView(weather, full())
-        val details = text("体感 — · 降水 — · 风 —", 12f, SOFT)
-        details.setGravity(Gravity.CENTER)
-        details.setPadding(0, dp(4), 0, 0)
-        weatherDetails = details
-        page.addView(details, full())
-        val updated = text("", 11f, 0xBBFFFFFF.toInt())
-        updated.setGravity(Gravity.CENTER)
-        updated.setPadding(0, dp(3), 0, 0)
-        updated.setOnClickListener { refreshWeather(true) }
-        weatherUpdated = updated
-        page.addView(updated, full())
-        space(page, 16)
+        head.addView(toggle, LinearLayout.LayoutParams(-2, T_PILL))
+        page.addView(head, full())
+        val currentName = ProfileStore.activeName(this)
+        val active = text((if (currentName.isEmpty()) "未选择配置" else currentName) + "  ﹀", 13f, SOFT)
+        active.setPadding(0, dp(8), 0, dp(16))
+        active.contentDescription = "选用配置"
+        active.setOnClickListener { showProfilePicker() }
+        nodeTitle = active
+        page.addView(active, full())
         val reading = row()
         reading.setGravity(Gravity.CENTER)
         val latency = text("—", 68f, WHITE)
@@ -664,16 +907,17 @@ class MainActivity : Activity() {
         }
         val dockParams = FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM)
         dockParams.setMargins(dp(16), 0, dp(16), dp(T_DOCK_MARGIN))
-        root.addView(bar, dockParams)
+        panel.addView(bar, dockParams)
         dock = bar
         val reserved = T_DOCK_SLOT + T_DOCK_PAD * 2 + T_DOCK_MARGIN + 8
-        page.setPadding(dp(20), dp(16), dp(20), dp(reserved))
+        page.setPadding(dp(20), dp(52), dp(20), dp(reserved))
     }
 
     private fun selectTab(tab: Int) {
+        if (!panelOpen) openPanel()
         if (selectedTab == tab) return
         selectedTab = tab
-        buildPage()
+        buildPanel()
     }
 
     private fun refreshStatus() {
@@ -707,8 +951,9 @@ class MainActivity : Activity() {
             renderingSwitch = false
         }
         val activeName = ProfileStore.activeName(this)
-        profileLabel?.text = activeName + "  ﹀"
-        nodeTitle?.text = activeName
+        val activeLabel = if (activeName.isEmpty()) "未选择配置" else activeName
+        profileLabel?.text = activeLabel + "  ﹀"
+        nodeTitle?.text = activeLabel + "  ﹀"
         stateLabel?.let { label ->
             label.text = (if (VpnController.running) "● " else "○ ") + state
             label.setTextColor(theme.textColor)
@@ -751,39 +996,7 @@ class MainActivity : Activity() {
                 }
             }
         }
-        cityLabel?.text = weatherCityName() + "  ﹀"
-        val current = weatherState
-        if (current != null) {
-            val has = current.hasData()
-            val temperature = temperatureLabel
-            if (temperature != null) {
-                val stamp = if (has) {
-                    current.updatedAt.toString() + "/" + current.weatherCode + "/" + current.isDay + "/" + current.loading
-                } else {
-                    "none"
-                }
-                val changed = stamp != lastWeatherStamp
-                lastWeatherStamp = stamp
-                temperature.text = if (has) Math.round(current.temperature).toString() + "°" else "—°"
-                conditionsLabel?.text = if (has) {
-                    theme.weatherNameZh + " · " + theme.weatherNameEn
-                } else if (current.loading) {
-                    "天气加载中…"
-                } else {
-                    "天气暂不可用"
-                }
-                weatherDetails?.text = if (has) {
-                    "体感 " + Math.round(current.apparentTemperature) + "° · 降水 " +
-                        String.format(Locale.ROOT, "%.1f", current.precipitation) + " mm · 风 " +
-                        Math.round(current.windSpeed) + " km/h"
-                } else {
-                    "无法读取天气数据，点击下方时间重试"
-                }
-                weatherUpdated?.text = if (has) weatherUpdatedText(current) else current.errorMessage
-                // The cached readings survive a failed refresh, so give the icon the full state.
-                if (changed) weatherIcon?.setWeather(current)
-            }
-        }
+        renderWeather(weatherState)
         val errorView = errorLabel
         if (errorView != null) {
             errorView.text = if (error.isEmpty()) "暂无服务错误" else error
@@ -1012,7 +1225,7 @@ class MainActivity : Activity() {
                 handler.post {
                     busy = false
                     if (isFinishing || isDestroyed) return@post
-                    buildPage()
+                    buildPanel()
                     toast("已选用 " + profile.name)
                 }
             } catch (e: Exception) {
@@ -1107,7 +1320,7 @@ class MainActivity : Activity() {
                             if (isFinishing || isDestroyed) return@post
                             if (save) {
                                 dialog.dismiss()
-                                buildPage()
+                                buildPanel()
                                 toast("配置已通过检查并保存")
                             } else {
                                 result.setText("内核检查通过。是否能建立 VPN 仍取决于 TUN、权限与网络环境。")
@@ -1152,7 +1365,7 @@ class MainActivity : Activity() {
                 if (!canModify()) return@setPositiveButton
                 try {
                     ProfileStore.delete(this, profile.id)
-                    buildPage()
+                    buildPanel()
                     toast("配置已删除")
                 } catch (e: Exception) {
                     showError("删除失败", e)
@@ -1207,12 +1420,172 @@ class MainActivity : Activity() {
         return if (state == null || state.city.isEmpty()) "台北" else state.city
     }
 
-    private fun weatherUpdatedText(state: WeatherState): String {
-        // Cached readings survive a failed refresh; report the failure instead of only "数据已过期".
-        if (state.error && state.errorMessage.isNotEmpty()) return state.errorMessage
-        val age = Math.max(0L, System.currentTimeMillis() - state.updatedAt)
-        val label = if (state.stale || age >= WeatherService.MIN_REFRESH_INTERVAL_MS) "数据已过期" else "已更新"
-        return label + " · 点击刷新"
+    /** Paints the sky screen. Cheap text updates every tick; rows and bars only on new data. */
+    private fun renderWeather(state: WeatherState?) {
+        val title = cityTitle ?: return
+        title.text = weatherCityName()
+        val has = state != null && state.hasData()
+        if (!has) {
+            bigTemp?.text = "—"
+            conditionLine?.text = if (state?.loading == true) "天气加载中…" else "天气暂不可用"
+            aqiPillText?.text = "空气质量 —"
+            val message = state?.errorMessage.orEmpty()
+            weatherError?.text = message
+            weatherError?.visibility = if (message.isEmpty()) View.GONE else View.VISIBLE
+            if (renderedWeather != "none") {
+                renderedWeather = "none"
+                precipChart?.setValues(emptyList())
+                precipSentence?.text = "暂无降水数据"
+                precipEmpty?.visibility = View.GONE
+                renderForecast(null)
+            }
+            return
+        }
+        val current = state!!
+        bigTemp?.text = temperatureSpan(Math.round(current.temperature).toString())
+        val max = current.todayMax()
+        val min = current.todayMin()
+        conditionLine?.text = if (max.isFinite() && min.isFinite()) {
+            theme.weatherNameZh + "  最高 " + Math.round(max) + "°  最低 " + Math.round(min) + "°"
+        } else {
+            theme.weatherNameZh
+        }
+        aqiPillText?.text = if (current.aqi.isFinite()) {
+            "空气质量 " + current.aqiLabel + " " + Math.round(current.aqi)
+        } else {
+            "空气质量 —"
+        }
+        val message = when {
+            current.error && current.errorMessage.isNotEmpty() -> current.errorMessage
+            current.stale -> "数据已过期 · 点击刷新"
+            else -> ""
+        }
+        weatherError?.text = message
+        weatherError?.visibility = if (message.isEmpty()) View.GONE else View.VISIBLE
+        weatherError?.setOnClickListener { refreshWeather(true) }
+
+        val stamp = current.updatedAt.toString() + "/" + current.weatherCode + "/" +
+            current.daily.size + "/" + current.precipitation15.size + "/" + current.aqi
+        if (stamp == renderedWeather) return
+        renderedWeather = stamp
+        precipSentence?.text = precipSummary(current.precipitation15)
+        precipChart?.setValues(current.precipitation15)
+        precipEmpty?.let { empty ->
+            empty.visibility = if (current.precipitation15.isEmpty()) View.VISIBLE else View.GONE
+            empty.text = "该地区暂不提供 15 分钟级降水预报，可参考下方日预报。"
+        }
+        renderForecast(current)
+    }
+
+    private fun renderForecast(state: WeatherState?) {
+        val rows = forecastRows ?: return
+        rows.removeAllViews()
+        val daily = state?.daily.orEmpty().filter { it.isValid() }
+        if (daily.isEmpty()) {
+            val hint = text("暂无逐日预报，点击天气胶囊或稍后重试。", 13f, SOFT)
+            hint.setPadding(0, dp(14), 0, dp(14))
+            rows.addView(hint, full())
+            return
+        }
+        val floor = daily.minOf { it.min }
+        val ceiling = daily.maxOf { it.max }
+        daily.forEachIndexed { index, day ->
+            if (index > 0) {
+                val divider = View(this)
+                divider.setBackgroundColor(withAlpha(theme.textColor, 0x1F))
+                rows.addView(divider, LinearLayout.LayoutParams(-1, dp(1)))
+            }
+            val line = row()
+            line.setPadding(0, dp(10), 0, dp(10))
+            val label = text(day.label, 15f, WHITE)
+            line.addView(label, LinearLayout.LayoutParams(dp(52), -2))
+            val description = text(themeFor(day.weatherCode).weatherNameZh, 14f, withAlpha(theme.secondaryTextColor, 0xF0))
+            description.setSingleLine(true)
+            description.ellipsize = TextUtils.TruncateAt.END
+            line.addView(description, LinearLayout.LayoutParams(0, -2, 1f))
+            val icon = WeatherIconView(this)
+            val dayTheme = themeFor(day.weatherCode)
+            icon.setType(dayTheme.iconType)
+            icon.setTint(theme.iconColor)
+            icon.contentDescription = dayTheme.weatherNameZh
+            val iconParams = LinearLayout.LayoutParams(dp(26), dp(26))
+            iconParams.leftMargin = dp(6)
+            iconParams.rightMargin = dp(8)
+            line.addView(icon, iconParams)
+            val low = text(Math.round(day.min).toString() + "°", 14f, theme.secondaryTextColor)
+            low.setGravity(Gravity.END)
+            line.addView(low, LinearLayout.LayoutParams(dp(36), -2))
+            val bar = TemperatureRangeView(this)
+            bar.setTrackColor(withAlpha(theme.textColor, 0x26))
+            bar.setRange(day.min, day.max, floor, ceiling)
+            val barParams = LinearLayout.LayoutParams(0, dp(5), 1f)
+            barParams.leftMargin = dp(10)
+            barParams.rightMargin = dp(10)
+            line.addView(bar, barParams)
+            val high = text(Math.round(day.max).toString() + "°", 14f, WHITE)
+            high.setGravity(Gravity.END)
+            line.addView(high, LinearLayout.LayoutParams(dp(36), -2))
+            rows.addView(line, full())
+        }
+    }
+
+    /** Reuses the WMO mapping for a single code without inventing a reading. */
+    private fun themeFor(code: Int): WeatherTheme = WeatherTheme.from(
+        WeatherState(
+            "", "", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, code, true, 1L, false, false, false,
+        ),
+    )
+
+    /**
+     * Turns the 15-minute nowcast into one sentence: when it stops, whether it returns, or when it
+     * starts. Thresholds are 0.05 mm per 15 minutes so trace amounts do not count as rain.
+     */
+    private fun precipSummary(values: List<Double>): String {
+        if (values.isEmpty()) return "暂无分钟级降水预报"
+        val wet = 0.05
+        if (values.first() > wet) {
+            val stop = values.indexOfFirst { it <= wet }
+            if (stop < 0) return "未来两小时降水持续"
+            val resume = (stop until values.size).firstOrNull { values[it] > wet }
+            return if (resume != null) {
+                "约" + roundMinutes(stop * 15) + "分钟后雨渐停，不过" +
+                    roundMinutes(resume * 15) + "分钟左右还会下雨"
+            } else {
+                "约" + roundMinutes(stop * 15) + "分钟后雨渐停"
+            }
+        }
+        val start = values.indexOfFirst { it > wet }
+        return if (start >= 0) {
+            "预计" + roundMinutes(start * 15) + "分钟后开始下雨"
+        } else {
+            "未来两小时无降水"
+        }
+    }
+
+    private fun roundMinutes(minutes: Int): Int = Math.max(5, Math.round(minutes / 5f) * 5)
+
+    /** Big reading with the ring degree sign scaled down and raised, like the reference layout. */
+    private fun temperatureSpan(value: String): CharSequence {
+        val text = value + "°"
+        val span = SpannableString(text)
+        val start = text.length - 1
+        span.setSpan(RelativeSizeSpan(0.34f), start, text.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+        span.setSpan(SuperscriptSpan(), start, text.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+        return span
+    }
+
+    private fun showAirQuality() {
+        val current = weatherState
+        val value = current?.aqi ?: Double.NaN
+        val message = if (value.isFinite()) {
+            "US AQI " + Math.round(value) + " · " + current?.aqiLabel.orEmpty() +
+                "\n\n空气质量指数来自 Open-Meteo 空气质量接口，采用 US AQI 口径；" +
+                "数值越高表示污染越重，与 VPN 连接状态无关。"
+        } else {
+            "暂未获取到空气质量数据。空气质量为可选接口，失败不影响天气显示。"
+        }
+        AlertDialog.Builder(this).setTitle("空气质量").setMessage(message)
+            .setPositiveButton("知道了", null).show()
     }
 
     private fun refreshWeather(force: Boolean) {
@@ -1223,11 +1596,16 @@ class MainActivity : Activity() {
         val state = weatherState
         val next = WeatherTheme.from(state)
         WeatherTheme.apply(this, root, state)
+        backdrop.setTheme(next)
+        paintFloatingButtons()
         val key = themeKeyOf(next)
         theme = next
         if (key != themeKey) {
             themeKey = key
-            buildPage() // Palette changed: rebuild so every card, dock and label picks it up.
+            // Palette changed: rebuild both surfaces so cards, dock and labels pick it up.
+            buildWeatherScreen()
+            buildPanel()
+            refreshStatus()
             return
         }
         refreshStatus() // Same palette: only refresh readings, keeping the scroll position.
@@ -1267,7 +1645,7 @@ class MainActivity : Activity() {
             .setTitle("选择天气城市")
             .setView(panel)
             .setNegativeButton("取消", null)
-            .setNeutralButton("使用当前位置天气数据源默认城市") { _, _ ->
+            .setNeutralButton("使用默认城市（台北）") { _, _ ->
                 weatherService?.setCity(WeatherService.DEFAULT_CITY)
                 weatherSearchRefresh()
             }
@@ -1295,13 +1673,19 @@ class MainActivity : Activity() {
         }
         citySearchStatus?.text = "找到 " + cities.size + " 个结果"
         for (city in cities) {
+            // The picker is a light system dialog, so its rows use fixed dialog-friendly colors
+            // instead of the sky palette (which would be white-on-white in day themes).
             val item = text(
                 city.displayName + (if (city.country.isEmpty()) "" else " · " + city.country),
                 15f,
-                theme.textColor,
+                0xFF1B2430.toInt(),
             )
-            item.setPadding(dp(10), dp(12), dp(10), dp(12))
-            item.background = round(withAlpha(theme.cardColor, 0xE8), 14)
+            item.setPadding(dp(12), dp(13), dp(12), dp(13))
+            item.background = RippleDrawable(
+                ColorStateList.valueOf(0x22000000),
+                round(0xFFEDF1F6.toInt(), 12),
+                round(0xFFFFFFFF.toInt(), 12),
+            )
             item.setOnClickListener {
                 weatherService?.setCity(city)
                 cityDialog?.dismiss()

@@ -1,6 +1,6 @@
 # SkyBox Android ARM64
 
-SkyBox 是基于 reF1nd/sing-box 的独立 Android 客户端，采用蓝色渐变天气仪表、顶部配置切换/连接开关、大号 HTTP 延迟读数、最近一分钟下载记录、用量卡片和悬浮四页底栏。内核来自 `reF1nd-testing-next`，基线提交 `3cf2b01ce`（`v1.15.0-alpha.13-reF1nd` 之上叠加 DNS 缓存修复 `1d089fcba`）；应用包名 `io.github.yuedaochangmendian.skybox`，Android 7.0+（API 24），ABI 仅 `arm64-v8a`。
+SkyBox 是基于 reF1nd/sing-box 的独立 Android 客户端。主界面为全屏天气页：城市与时间提示、大号温度、天气状况与当日高低温、空气质量与天气预报胶囊、分钟级降水柱状图（含大/中/小刻度）、逐日预报温度条；左下角圆形按钮展开控制面板（连接开关、延迟、流量、配置、日志、设置），右下角圆形按钮添加配置。内核来自 `reF1nd-testing-next`，基线提交 `3cf2b01ce`（`v1.15.0-alpha.13-reF1nd` 之上叠加 DNS 缓存修复 `1d089fcba`）；应用包名 `io.github.yuedaochangmendian.skybox`，Android 7.0+（API 24），ABI 仅 `arm64-v8a`。
 
 ## 使用
 
@@ -41,6 +41,15 @@ GitHub Actions 工作流 **SkyBox Android ARM64**（`.github/workflows/skybox-an
 APK 构建、Android Lint、签名与 ZIP/ABI 检查结果以本次交付说明为准。未连接 ARM64 Android 真机时，不能声称已经验证系统 VPN 授权、实际代理联网或像素级截图还原。
 
 本项目与内核遵循根目录 `../LICENSE` 的 GPL-3.0-or-later 及相关命名/归属说明。sing-box Copyright (C) 2022 nekohasekai；SkyBox 为独立衍生客户端，不代表 SagerNet 官方或上游背书。分发 APK 应同时提供对应分支源码、许可证及依赖许可。
+
+## v1.4.0 界面改版说明
+
+- 主界面改为全屏天气页，按参考稿还原：`SkyBackdropView`（渐变 + 雨/雪/星/雾粒子，约 30fps，系统栏透明）、大号温度（`SuperscriptSpan` 缩放的度数符号）、空气质量与天气预报胶囊、`PrecipitationChartView`（15 分钟降水柱状图 + 虚线刻度 + 大/中/小轴）、`TemperatureRangeView`（逐日最低/最高温度条）。
+- 天气数据扩展：`WeatherState` 新增 `daily`（4 天）、`precipitation15`（8 个 15 分钟值）、`aqi/aqiLabel`；`WeatherService` 增加 `daily`、`minutely_15` 参数与可选的 `air-quality-api.open-meteo.com`（US AQI，失败不影响天气）；快照把这些字段序列化为一个 JSON 字符串持久化。
+- 降水文案由真实 nowcast 推导（何时停、是否再下、何时开始、无降水），不编造天气。
+- 交互：左下圆按钮打开原有四页控制面板（`panel` 覆盖层，返回键关闭），右下圆按钮弹出「从文件导入 JSON / 新建空白配置」。原「概览」页保留连接开关、延迟、流量与快捷入口，但不再重复天气读数。
+- 配色按主题切换：夜间深蓝渐变 + 白色文字，日间浅蓝渐变 + 深色文字，卡片、胶囊、刻度线、图表网格与浮动按钮均取自 `WeatherTheme`；同时删除未使用的 `WeatherView`。
+- 位置提示写为「手动选择城市，获取当地天气」，因为本应用不申请定位权限，不复制参考稿中「开启位置服务」的措辞。
 
 ## v1.3.0 内核基线更新说明
 

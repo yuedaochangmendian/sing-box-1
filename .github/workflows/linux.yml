@@ -170,12 +170,14 @@ jobs:
           PKG_VERSION="${{ needs.calculate_version.outputs.version }}"
           PKG_VERSION="${PKG_VERSION//-/\~}"
           echo "PKG_VERSION=${PKG_VERSION}" >> "${GITHUB_ENV}"
+      - name: Detect signing secrets
+        run: |-
+          echo "HAS_GPG=$(test -n "${{ secrets.GPG_KEY }}" && echo true || echo false)" >> "$GITHUB_ENV"
       - name: Package DEB
         if: matrix.debian != ''
         run: |
           set -xeuo pipefail
           sudo gem install fpm
-          sudo apt-get install -y debsigs
           cp .fpm_systemd .fpm
           fpm -t deb \
             --name "${NAME}" \
@@ -183,6 +185,11 @@ jobs:
             -p "dist/${NAME}_${{ needs.calculate_version.outputs.version }}_linux_${{ matrix.debian }}.deb" \
             --architecture ${{ matrix.debian }} \
             dist/sing-box=/usr/bin/sing-box
+      - name: Sign DEB
+        if: matrix.debian != '' && env.HAS_GPG == 'true'
+        run: |
+          set -xeuo pipefail
+          sudo apt-get install -y debsigs
           rm -rf $HOME/.gnupg
           gpg --pinentry-mode loopback --passphrase "${{ secrets.GPG_PASSPHRASE }}" --import <<EOF
           ${{ secrets.GPG_KEY }}
@@ -201,6 +208,10 @@ jobs:
             -p "dist/${NAME}_${{ needs.calculate_version.outputs.version }}_linux_${{ matrix.rpm }}.rpm" \
             --architecture ${{ matrix.rpm }} \
             dist/sing-box=/usr/bin/sing-box
+      - name: Sign RPM
+        if: matrix.rpm != '' && env.HAS_GPG == 'true'
+        run: |-
+          set -xeuo pipefail
           cat > $HOME/.rpmmacros <<EOF
           %_gpg_name ${{ secrets.GPG_KEY_ID }}
           %_gpg_sign_cmd_extra_args --pinentry-mode loopback --passphrase ${{ secrets.GPG_PASSPHRASE }}
@@ -237,7 +248,10 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+      - name: Detect publish token
+        run: |-
+          echo "HAS_FURY=$(test -n "${{ secrets.FURY_TOKEN }}" && echo true || echo false)" >> "$GITHUB_ENV"
       - name: Publish packages
-        if: github.event_name != 'push'
+        if: github.event_name != 'push' && env.HAS_FURY == 'true'
         run: |-
           ls dist | xargs -I {} curl -F "package=@dist/{}" https://${{ secrets.FURY_TOKEN }}@push.fury.io/sagernet/

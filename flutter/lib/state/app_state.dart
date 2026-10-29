@@ -39,6 +39,7 @@ class AppState extends ChangeNotifier {
   List<VpnGroup> liveGroups = const <VpnGroup>[];
   List<VpnGroup> staticGroups = const <VpnGroup>[];
   List<int> speedHistory = const <int>[];
+  List<int> uploadHistory = const <int>[];
   int sampleIntervalMs = 10000;
   int sampleCapacity = 60;
   String logs = '';
@@ -154,6 +155,7 @@ class AppState extends ChangeNotifier {
     final previous = status;
     status = await _bridge.status();
     speedHistory = running ? await _bridge.speedHistory() : const <int>[];
+    uploadHistory = running ? await _bridge.uploadHistory() : const <int>[];
     await _keepReadingsFresh();
     if (status.groupsRevision != previous.groupsRevision || running != previous.running) {
       liveGroups = running ? await _bridge.groups() : const <VpnGroup>[];

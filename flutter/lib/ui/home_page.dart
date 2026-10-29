@@ -308,11 +308,12 @@ class _SpeedCard extends StatelessWidget {
           Text(sentence, style: TextStyle(fontSize: 15, color: textColor)),
           const SizedBox(height: 12),
           SpeedChart(
-            samples: running ? app.speedHistory : const <int>[],
+            downSamples: running ? app.speedHistory : const <int>[],
+            upSamples: running ? app.uploadHistory : const <int>[],
             slotCount: app.sampleCapacity,
             lineColor: const Color(0xF2BEE5FF),
             gridColor: textColor.withAlpha(0x26),
-            height: 104,
+            height: 156,
           ),
           const SizedBox(height: 6),
           Row(

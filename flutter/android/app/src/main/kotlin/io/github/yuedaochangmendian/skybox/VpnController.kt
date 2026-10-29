@@ -152,8 +152,10 @@ class VpnController : VpnService(), PlatformInterface, CommandServerHandler, Com
             if (!Libbox.hasTunInbound(config)) throw IllegalArgumentException("Android VPN 配置必须包含 tun 入站")
             synchronized(LOCK) {
                 HISTORY.clear()
+                UPLINK_HISTORY.clear()
                 sampleAt = SystemClock.elapsedRealtime()
                 sampleTotal = 0
+                sampleUplinkTotal = 0
             }
             VpnGroups.clear()
             LatencyProbe.milliseconds = -1
@@ -707,8 +709,11 @@ class VpnController : VpnService(), PlatformInterface, CommandServerHandler, Com
             if (now - sampleAt >= SAMPLE_INTERVAL_MS) {
                 HISTORY.addLast((downlinkTotal - sampleTotal).coerceAtLeast(0))
                 while (HISTORY.size > HISTORY_CAPACITY) HISTORY.removeFirst()
+                UPLINK_HISTORY.addLast((uplinkTotal - sampleUplinkTotal).coerceAtLeast(0))
+                while (UPLINK_HISTORY.size > HISTORY_CAPACITY) UPLINK_HISTORY.removeFirst()
                 sampleAt = now
                 sampleTotal = downlinkTotal
+                sampleUplinkTotal = uplinkTotal
             }
         }
     }
@@ -786,12 +791,16 @@ class VpnController : VpnService(), PlatformInterface, CommandServerHandler, Com
 
         /** Download bytes per [SAMPLE_INTERVAL_MS] bucket, chronological, capped at [HISTORY_CAPACITY]. */
         private val HISTORY = java.util.ArrayDeque<Long>()
+
+        /** Upload bytes per [SAMPLE_INTERVAL_MS] bucket, parallel to [HISTORY]. */
+        private val UPLINK_HISTORY = java.util.ArrayDeque<Long>()
         private const val SAMPLE_INTERVAL_MS = 1_000L
 
         /** 15 buckets × 1 s = the 15-second window the speed chart axis advertises. */
         private const val HISTORY_CAPACITY = 15
         private var sampleAt = 0L
         private var sampleTotal = 0L
+        private var sampleUplinkTotal = 0L
 
         private val workerLock = Any()
 
@@ -825,6 +834,9 @@ class VpnController : VpnService(), PlatformInterface, CommandServerHandler, Com
 
         @JvmStatic
         fun speedHistory(): LongArray = synchronized(LOCK) { HISTORY.toLongArray() }
+
+        @JvmStatic
+        fun uploadHistory(): LongArray = synchronized(LOCK) { UPLINK_HISTORY.toLongArray() }
 
         @JvmStatic
         fun speedSampleIntervalMs(): Long = SAMPLE_INTERVAL_MS

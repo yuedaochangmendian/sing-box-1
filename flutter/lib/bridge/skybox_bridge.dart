@@ -124,6 +124,13 @@ class SkyboxBridge {
         .toList();
   }
 
+  Future<List<int>> uploadHistory() async {
+    final values = await _channel.invokeListMethod<dynamic>('uploadHistory');
+    return (values ?? const <dynamic>[])
+        .map((value) => value is num ? value.toInt() : 0)
+        .toList();
+  }
+
   Future<int> sampleIntervalMs() async =>
       await _channel.invokeMethod<int>('sampleIntervalMs') ?? 10000;
 

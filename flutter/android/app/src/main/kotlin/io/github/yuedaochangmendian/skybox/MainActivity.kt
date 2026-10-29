@@ -68,6 +68,7 @@ class MainActivity : FlutterActivity() {
             "status" -> result.success(statusMap())
             "logs" -> result.success(VpnController.logs())
             "speedHistory" -> result.success(VpnController.speedHistory().toList())
+            "uploadHistory" -> result.success(VpnController.uploadHistory().toList())
             "sampleIntervalMs" -> result.success(VpnController.speedSampleIntervalMs())
             "sampleCapacity" -> result.success(VpnController.speedSampleCapacity())
             "coreVersion" -> result.success(coreVersion)

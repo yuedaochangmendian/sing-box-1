@@ -1,4 +1,6 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
 
@@ -8,6 +10,15 @@ import 'ui/home_page.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Never render the debug baseline/size overlay ("Show Baselines" draws yellow
+  // baseline lines under every text run). This is a debug-only painting aid; the
+  // flag below forces it off at startup regardless of stale Inspector state.
+  if (kDebugMode) {
+    debugPaintBaselinesEnabled = false;
+    debugPaintSizeEnabled = false;
+    debugPaintLayerBordersEnabled = false;
+    debugRepaintRainbowEnabled = false;
+  }
   // Warms the glass shaders so the first frame already shows real refraction.
   await LiquidGlassWidgets.initialize();
   runApp(LiquidGlassWidgets.wrap(

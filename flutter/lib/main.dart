@@ -6,6 +6,17 @@ import 'state/app_state.dart';
 import 'theme/sky_theme.dart';
 import 'ui/home_page.dart';
 
+/// Bundled Chinese-capable face (see the `fonts` section of pubspec.yaml).
+/// Using an explicit family keeps text off the device's default face, which some
+/// OEM substitutions render with stray underline-like marks under glyph runs.
+const String kAppFontFamily = 'NotoSansSC';
+
+/// Material's theme for that family, with every style carrying an explicit "no
+/// decoration" so no text can inherit an underline from an ancestor style.
+final TextTheme kAppTextTheme = ThemeData(fontFamily: kAppFontFamily)
+    .textTheme
+    .apply(decoration: TextDecoration.none);
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // Warms the glass shaders so the first frame already shows real refraction.
@@ -58,6 +69,8 @@ class _SkyBoxAppState extends State<SkyBoxApp> with WidgetsBindingObserver {
       title: 'SkyBox',
       theme: ThemeData(
         useMaterial3: true,
+        fontFamily: kAppFontFamily,
+        textTheme: kAppTextTheme,
         brightness: theme.isDay ? Brightness.light : Brightness.dark,
         colorScheme: ColorScheme.fromSeed(
           seedColor: theme.iconColor,

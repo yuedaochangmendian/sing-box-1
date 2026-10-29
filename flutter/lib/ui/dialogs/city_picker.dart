@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
 
 import '../../models/weather.dart';
 import '../../state/app_state.dart';
@@ -19,7 +18,9 @@ Future<void> openCityPicker(BuildContext context, AppState app) async {
       padding: EdgeInsets.only(
         bottom: MediaQuery.of(sheetContext).viewInsets.bottom,
       ),
-      child: GlassSheet(
+      child: SkySheetSurface(
+        tint: theme.cardColor,
+        dark: !theme.isDay,
         child: _CityPickerBody(app: app, theme: theme),
       ),
     ),
@@ -92,7 +93,7 @@ class _CityPickerBodyState extends State<_CityPickerBody> {
           Text('选择城市',
               style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: theme.textColor)),
           const SizedBox(height: 12),
-          GlassTextField(
+          SkyGlassField(
             controller: _controller,
             placeholder: '输入城市名称',
             onChanged: _search,

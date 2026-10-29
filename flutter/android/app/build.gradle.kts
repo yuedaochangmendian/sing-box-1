@@ -4,6 +4,10 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+// Release ships arm64 only; pass -PskyboxAbi=x86_64 for local emulator builds.
+val skyboxAbi: String = (project.findProperty("skyboxAbi") as? String) ?: "arm64-v8a"
+val allAbis = listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
+
 android {
     namespace = "io.github.yuedaochangmendian.skybox"
     // shared_preferences_android (and the AGP 9 baseline) require API 36 to compile.
@@ -21,11 +25,10 @@ android {
         targetSdk = 35
         // Version comes from pubspec.yaml (flutter.versionCode/versionName are
         // injected by the Flutter Gradle plugin); fallbacks match the current release.
-        versionCode = flutter.versionCode ?: 9
-        versionName = flutter.versionName ?: "3.0.2"
+        versionCode = flutter.versionCode ?: 12
+        versionName = flutter.versionName ?: "3.0.5"
         ndk {
-            // Release ships arm64 only; pass -PskyboxAbi=x86_64 for local emulator builds.
-            abiFilters += listOf(project.findProperty("skyboxAbi") as? String ?: "arm64-v8a")
+            abiFilters += listOf(skyboxAbi)
         }
     }
 
@@ -40,6 +43,11 @@ android {
     packaging {
         jniLibs {
             useLegacyPackaging = false
+            // abiFilters only governs native code this build compiles. Prebuilt
+            // .so files that arrive inside AARs — the Flutter embedding's
+            // libdartjni, datastore's shared counter — ignore it and would ride
+            // along for every ABI as dead weight. Drop the ABIs we do not ship.
+            excludes += allAbis.filter { it != skyboxAbi }.map { "lib/$it/**" }
         }
     }
 }

@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
 
 import '../bridge/skybox_bridge.dart';
 import '../state/app_state.dart';
@@ -50,7 +49,7 @@ class _PanelPageState extends State<PanelPage> {
     final theme = this.theme;
     return PopScope(
       canPop: true,
-      child: GlassScaffold(
+      child: SkyScaffold(
         background: SizedBox.expand(
           child: DecoratedBox(decoration: BoxDecoration(gradient: theme.background)),
         ),
@@ -259,20 +258,13 @@ class _Profiles extends StatelessWidget {
     AppState app,
     ProfileSummary profile,
   ) async {
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showSkyConfirm(
       context: context,
-      builder: (context) => GlassDialog(
-        title: '删除配置？',
-        message: '将从本机删除「${profile.name}」。此操作不可撤销。',
-        actions: <GlassDialogAction>[
-          GlassDialogAction(label: '取消', onPressed: () => Navigator.pop(context, false)),
-          GlassDialogAction(
-            label: '删除',
-            isDestructive: true,
-            onPressed: () => Navigator.pop(context, true),
-          ),
-        ],
-      ),
+      title: '删除配置？',
+      message: '将从本机删除「${profile.name}」。此操作不可撤销。',
+      confirmLabel: '删除',
+      cancelLabel: '取消',
+      destructive: true,
     );
     if (confirmed != true) return;
     await app.deleteProfile(profile.id);

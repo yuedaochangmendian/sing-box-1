@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 3.0.4+11
+version: 3.0.5+12
 
 environment:
   sdk: ^3.13.7
@@ -31,12 +31,11 @@ dependencies:
   flutter:
     sdk: flutter
 
-  # The following adds the Cupertino Icons font to your application.
-  # Use with the CupertinoIcons class for iOS style icons.
-  cupertino_icons: ^1.0.8
-
-  # Apple-style Liquid Glass material: real shader refraction over a captured backdrop.
-  liquid_glass_widgets: ^1.16.0
+  # Liquid Glass for Flutter: refraction, blur, tint and a rim over the live
+  # backdrop. One GlassHost captures the backdrop once for every surface, and
+  # the glass optics are calibrated against Apple's iOS 26 material.
+  # Zero runtime dependencies of its own; ships four small shaders.
+  g1455: ^0.4.0
 
   # Weather, air quality, geocoding and exit-IP geolocation.
   http: ^1.2.2

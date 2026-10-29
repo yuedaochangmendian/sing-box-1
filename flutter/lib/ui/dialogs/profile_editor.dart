@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
 
 import '../../state/app_state.dart';
 import '../../theme/sky_theme.dart';
@@ -90,7 +89,7 @@ class _ProfileEditorPageState extends State<_ProfileEditorPage> {
   @override
   Widget build(BuildContext context) {
     final theme = widget.theme;
-    return GlassScaffold(
+    return SkyScaffold(
       background: SizedBox.expand(
         child: DecoratedBox(decoration: BoxDecoration(gradient: theme.background)),
       ),
@@ -124,7 +123,7 @@ class _ProfileEditorPageState extends State<_ProfileEditorPage> {
                 ],
               ),
               const SizedBox(height: 14),
-              GlassTextField(
+              SkyGlassField(
                 controller: _name,
                 placeholder: '配置名称',
                 textStyle: TextStyle(color: theme.textColor),
@@ -132,27 +131,21 @@ class _ProfileEditorPageState extends State<_ProfileEditorPage> {
               ),
               const SizedBox(height: 12),
               Expanded(
-                child: GlassContainer.card(
+                child: SkyGlassField(
+                  controller: _config,
+                  placeholder: 'sing-box JSON',
+                  tint: theme.cardColor,
+                  dark: !theme.isDay,
+                  radius: 18,
                   padding: const EdgeInsets.all(12),
-                  shape: const LiquidRoundedSuperellipse(borderRadius: 18),
-                  settings: GlassKit.card(tint: theme.cardColor, dark: !theme.isDay),
-                  child: TextField(
-                    controller: _config,
-                    expands: true,
-                    maxLines: null,
-                    minLines: null,
-                    textAlignVertical: TextAlignVertical.top,
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontFamily: 'monospace',
-                      color: theme.textColor,
-                    ),
-                    decoration: InputDecoration(
-                      border: InputBorder.none,
-                      hintText: 'sing-box JSON',
-                      hintStyle: TextStyle(color: theme.secondaryTextColor),
-                    ),
+                  expands: true,
+                  textAlignVertical: TextAlignVertical.top,
+                  textStyle: TextStyle(
+                    fontSize: 12,
+                    fontFamily: 'monospace',
+                    color: theme.textColor,
                   ),
+                  placeholderStyle: TextStyle(color: theme.secondaryTextColor),
                 ),
               ),
               if (_error != null) ...<Widget>[

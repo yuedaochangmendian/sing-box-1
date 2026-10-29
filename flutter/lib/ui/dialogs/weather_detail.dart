@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
 
 import '../../models/weather.dart';
 import '../../state/app_state.dart';
@@ -27,7 +26,9 @@ Future<void> openWeatherDetail(
       minChildSize: 0.4,
       maxChildSize: 0.94,
       expand: false,
-      builder: (context, controller) => GlassSheet(
+      builder: (context, controller) => SkySheetSurface(
+        tint: theme.cardColor,
+        dark: !theme.isDay,
         child: _WeatherDetailBody(
           app: app,
           theme: theme,

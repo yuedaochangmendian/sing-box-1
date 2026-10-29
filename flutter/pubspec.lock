@@ -65,14 +65,6 @@ packages:
       url: "https://pub.flutter-io.cn"
     source: hosted
     version: "3.0.8"
-  cupertino_icons:
-    dependency: "direct main"
-    description:
-      name: cupertino_icons
-      sha256: "41e005c33bd814be4d3096aff55b1908d419fde52ca656c8c47719ec745873cd"
-      url: "https://pub.flutter-io.cn"
-    source: hosted
-    version: "1.0.9"
   fake_async:
     dependency: transitive
     description:
@@ -120,6 +112,14 @@ packages:
     description: flutter
     source: sdk
     version: "0.0.0"
+  g1455:
+    dependency: "direct main"
+    description:
+      name: g1455
+      sha256: "22d1d2bf5e6cf8371a9cdcb454ef0985392ef1388f055946b431541adc74f647"
+      url: "https://pub.flutter-io.cn"
+    source: hosted
+    version: "0.4.0"
   hooks:
     dependency: transitive
     description:
@@ -192,14 +192,6 @@ packages:
       url: "https://pub.flutter-io.cn"
     source: hosted
     version: "6.1.0"
-  liquid_glass_widgets:
-    dependency: "direct main"
-    description:
-      name: liquid_glass_widgets
-      sha256: fb03298a2a631d0edb44160f9bcc353a0877f22d1f115c0cf6ef5046eb55d7fb
-      url: "https://pub.flutter-io.cn"
-    source: hosted
-    version: "1.16.0"
   logging:
     dependency: transitive
     description:

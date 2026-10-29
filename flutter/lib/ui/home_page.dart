@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
 
 import '../bridge/skybox_bridge.dart';
 import '../models/weather.dart';
@@ -16,10 +15,9 @@ import 'dialogs/weather_detail.dart';
 
 /// Non-blocking message; the previous build used Android toasts.
 void showMessage(BuildContext context, String message) {
-  GlassToast.show(
+  SkyToast.show(
     context,
     message: message,
-    type: GlassToastType.neutral,
     duration: const Duration(seconds: 2),
   );
 }
@@ -88,7 +86,7 @@ class _HomePageState extends State<HomePage> {
   @override
   Widget build(BuildContext context) {
     final theme = this.theme;
-    return GlassScaffold(
+    return SkyScaffold(
       background: _SkyBackdrop(theme: theme),
       body: Stack(
         children: <Widget>[

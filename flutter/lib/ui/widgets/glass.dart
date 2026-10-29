@@ -1,67 +1,70 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
-import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
+import 'package:g1455/g1455.dart';
 
 /// Radii shared by every glass surface, mirroring the previous native build.
 class GlassRadii {
   static const double card = 22;
   static const double control = 20;
   static const double dock = 40;
+  static const double field = 14;
+  static const double sheet = 28;
 }
 
-/// Material presets. The library's shader does the refraction; these only set
-/// the optical constants — thickness drives the bevel (and therefore how far
-/// the backdrop is pulled in at the rim), [chromaticAberration] the rainbow,
-/// and [whitenStrength] the light-mode veil that keeps dark glyphs protected.
+/// Material presets.
+///
+/// g1455's optics are measured rather than dialled: a finish is a blur sigma, a
+/// tint laid over the refracted sample (`mix(base, rgb, a)`), a rim colour, and
+/// the shape of the bend at the edge ([GlassOptics] — reach, peak displacement
+/// and falloff). So each preset derives from the calibrated `.regular` branch
+/// through [GlassFinish.copyWith] and keeps its [GlassFinish.name], which is
+/// what keys the surface into the package's measured damage tables; only the
+/// tint (our sky palette) and the edge geometry are ours.
 class GlassKit {
+  /// The branch of Apple's `.regular` this appearance wears. Naming the
+  /// calibrated constant rather than rebuilding it keeps the measured tables.
+  static GlassFinish _base(bool dark) =>
+      dark ? GlassFinish.regularDark : GlassFinish.regularLight;
+
   /// Cards: thick enough to read as glass, calm enough for body text.
-  static LiquidGlassSettings card({required Color tint, required bool dark, double alpha = 0.34}) =>
-      LiquidGlassSettings(
-        thickness: 26,
-        blur: 13,
-        glassColor: tint.withAlpha((alpha * 255).round()),
-        saturation: 1.35,
-        chromaticAberration: 0.014,
-        refractiveIndex: 1.24,
-        lightIntensity: 0.55,
-        ambientStrength: 0.06,
-        whitenStrength: dark ? 0.05 : 0.20,
-        whitenGated: true,
-        rimShade: dark ? 0.10 : 0.06,
-        rimLight: dark ? 0.10 : 0.16,
+  static GlassFinish card({
+    required Color tint,
+    required bool dark,
+    double alpha = 0.34,
+  }) =>
+      _base(dark).copyWith(
+        blurSigmaLogical: 6.5,
+        tint: tint.withValues(alpha: alpha),
+        rim: dark ? const Color(0x1AFFFFFF) : const Color(0x33FFFFFF),
+        // A slightly deeper bevel than the 21px default so a large card reads
+        // as a thick slab rather than a film.
+        optics: const GlassOptics(thickness: 24, strength: -52),
       );
 
   /// Secondary pills and the dock: clearer, with a stronger edge.
-  static LiquidGlassSettings clear({required Color tint, required bool dark, double alpha = 0.30}) =>
-      LiquidGlassSettings(
-        thickness: 22,
-        blur: 15,
-        glassColor: tint.withAlpha((alpha * 255).round()),
-        saturation: 1.45,
-        chromaticAberration: 0.020,
-        refractiveIndex: 1.28,
-        lightIntensity: 0.62,
-        ambientStrength: 0.08,
-        whitenStrength: dark ? 0.06 : 0.26,
-        whitenGated: true,
-        rimShade: dark ? 0.12 : 0.07,
-        rimLight: dark ? 0.14 : 0.22,
+  static GlassFinish clear({
+    required Color tint,
+    required bool dark,
+    double alpha = 0.30,
+  }) =>
+      _base(dark).copyWith(
+        blurSigmaLogical: 8,
+        tint: tint.withValues(alpha: alpha),
+        rim: dark ? const Color(0x24FFFFFF) : const Color(0x40FFFFFF),
+        optics: const GlassOptics(),
       );
 
   /// The primary action. Opaque enough that white glyphs keep their contrast.
-  static LiquidGlassSettings tinted({required Color accent, required bool dark}) =>
-      LiquidGlassSettings(
-        thickness: 22,
-        blur: 8,
-        glassColor: accent.withAlpha(dark ? 0xE6 : 0xF2),
-        saturation: 1.60,
-        chromaticAberration: 0.018,
-        refractiveIndex: 1.30,
-        lightIntensity: 0.70,
-        ambientStrength: 0.10,
-        whitenStrength: 0.0,
-        whitenGated: false,
-        rimShade: 0.10,
-        rimLight: 0.26,
+  static GlassFinish tinted({
+    required Color accent,
+    required bool dark,
+  }) =>
+      _base(dark).copyWith(
+        blurSigmaLogical: 4,
+        tint: accent.withValues(alpha: dark ? 0.90 : 0.95),
+        rim: dark ? const Color(0x33FFFFFF) : const Color(0x4DFFFFFF),
+        optics: const GlassOptics(thickness: 22, strength: -46),
       );
 }
 
@@ -87,13 +90,14 @@ class SkyGlassCard extends StatelessWidget {
   final double? width;
 
   @override
-  Widget build(BuildContext context) => GlassContainer.card(
-        width: width,
-        padding: padding,
-        shape: LiquidRoundedSuperellipse(borderRadius: radius),
-        settings: GlassKit.card(tint: tint, dark: dark, alpha: alpha),
-        child: child,
-      );
+  Widget build(BuildContext context) {
+    final Widget surface = GlassSurface(
+      borderRadius: BorderRadius.circular(radius),
+      finish: GlassKit.card(tint: tint, dark: dark, alpha: alpha),
+      child: Padding(padding: padding, child: child),
+    );
+    return width == null ? surface : SizedBox(width: width, child: surface);
+  }
 }
 
 /// Capsule control: CLEAR for secondary actions, TINTED for the primary one.
@@ -123,13 +127,15 @@ class SkyGlassPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final textColor = foreground ?? (dark ? Colors.white : const Color(0xFF142B43));
-    return GlassButton.custom(
-      onTap: onTap ?? () {},
-      enabled: onTap != null,
-      height: height,
-      shape: LiquidRoundedSuperellipse(borderRadius: radius),
-      settings: GlassKit.clear(tint: tint, dark: dark),
+    final textColor =
+        foreground ?? (dark ? Colors.white : const Color(0xFF142B43));
+    return GlassButton(
+      onPressed: onTap,
+      borderRadius: BorderRadius.circular(radius),
+      // The control owns the tap target; the row below owns the content inset.
+      padding: EdgeInsets.zero,
+      minSize: Size(0, height),
+      finish: GlassKit.clear(tint: tint, dark: dark),
       child: Padding(
         padding: padding,
         child: Row(
@@ -183,18 +189,34 @@ class SkyGlassCircle extends StatelessWidget {
   final String? semanticLabel;
 
   @override
-  Widget build(BuildContext context) => GlassIconButton(
-        icon: IconTheme(
-          data: IconThemeData(
-            color: foreground ?? (dark ? Colors.white : const Color(0xFF142B43)),
-            size: size * 0.42,
+  Widget build(BuildContext context) => Semantics(
+        button: true,
+        label: semanticLabel,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: onPressed,
+          child: SizedBox(
+            width: size,
+            height: size,
+            child: GlassSurface(
+              borderRadius: BorderRadius.circular(size / 2),
+              finish: GlassKit.clear(tint: tint, dark: dark, alpha: 0.34),
+              // A control's disc carries no label of its own: the floor that
+              // dims glass for a label's sake would grey it over the backdrop.
+              labelled: false,
+              child: Center(
+                child: IconTheme(
+                  data: IconThemeData(
+                    color: foreground ??
+                        (dark ? Colors.white : const Color(0xFF142B43)),
+                    size: size * 0.42,
+                  ),
+                  child: icon,
+                ),
+              ),
+            ),
           ),
-          child: icon,
         ),
-        onPressed: onPressed,
-        size: size,
-        semanticLabel: semanticLabel,
-        settings: GlassKit.clear(tint: tint, dark: dark, alpha: 0.34),
       );
 }
 
@@ -216,20 +238,24 @@ class SkyGlassDock extends StatelessWidget {
   final bool dark;
 
   @override
-  Widget build(BuildContext context) => GlassContainer(
-        padding: const EdgeInsets.all(4),
-        shape: const LiquidRoundedSuperellipse(borderRadius: GlassRadii.dock),
-        settings: GlassKit.clear(tint: tint, dark: dark, alpha: 0.34),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-          children: <Widget>[
-            for (var i = 0; i < items.length; i++)
-              Expanded(child: _DockSlot(
-                item: items[i],
-                selected: i == selectedIndex,
-                onTap: () => onSelected(i),
-              )),
-          ],
+  Widget build(BuildContext context) => GlassSurface(
+        borderRadius: BorderRadius.circular(GlassRadii.dock),
+        finish: GlassKit.clear(tint: tint, dark: dark, alpha: 0.34),
+        child: Padding(
+          padding: const EdgeInsets.all(4),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: <Widget>[
+              for (var i = 0; i < items.length; i++)
+                Expanded(
+                  child: _DockSlot(
+                    item: items[i],
+                    selected: i == selectedIndex,
+                    onTap: () => onSelected(i),
+                  ),
+                ),
+            ],
+          ),
         ),
       );
 }
@@ -255,7 +281,9 @@ class _DockSlot extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final color = selected ? theme.colorScheme.primary : theme.colorScheme.onSurface.withAlpha(0xCC);
+    final color = selected
+        ? theme.colorScheme.primary
+        : theme.colorScheme.onSurface.withAlpha(0xCC);
     return Semantics(
       selected: selected,
       button: true,
@@ -287,4 +315,245 @@ class _DockSlot extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Screen shell: a full-bleed [background] with [body] laid over it.
+///
+/// g1455's `GlassScaffold` is built around bars and a scroll edge and takes no
+/// background, so the plain "backdrop under content" case lives here instead —
+/// it is a stack, and nothing about it needs capturing on its own.
+class SkyScaffold extends StatelessWidget {
+  const SkyScaffold({
+    super.key,
+    required this.background,
+    required this.body,
+  });
+
+  final Widget background;
+  final Widget body;
+
+  @override
+  Widget build(BuildContext context) => Stack(
+        children: <Widget>[
+          Positioned.fill(child: background),
+          Positioned.fill(child: body),
+        ],
+      );
+}
+
+/// Text field on glass.
+///
+/// g1455's own field draws its label in the finish's label colour and takes no
+/// text style, which a JSON editor and a hint in the sky palette both need to
+/// override — so this is a plain [TextField] on a [GlassSurface].
+class SkyGlassField extends StatelessWidget {
+  const SkyGlassField({
+    super.key,
+    this.controller,
+    this.focusNode,
+    this.placeholder,
+    this.onChanged,
+    this.onSubmitted,
+    this.textStyle,
+    this.placeholderStyle,
+    this.cursorColor,
+    this.tint,
+    this.dark = true,
+    this.radius = GlassRadii.field,
+    this.height = 48,
+    this.padding = const EdgeInsets.symmetric(horizontal: 14),
+    this.expands = false,
+    this.maxLines = 1,
+    this.minLines,
+    this.textAlignVertical,
+    this.keyboardType,
+    this.autofocus = false,
+    this.enabled = true,
+  });
+
+  final TextEditingController? controller;
+  final FocusNode? focusNode;
+  final String? placeholder;
+  final ValueChanged<String>? onChanged;
+  final ValueChanged<String>? onSubmitted;
+  final TextStyle? textStyle;
+  final TextStyle? placeholderStyle;
+  final Color? cursorColor;
+  final Color? tint;
+  final bool dark;
+  final double radius;
+
+  /// Fixed height for a single-line field. Ignored when [expands] is true, so
+  /// the field can take whatever its parent gives it.
+  final double height;
+  final EdgeInsetsGeometry padding;
+  final bool expands;
+  final int? maxLines;
+  final int? minLines;
+  final TextAlignVertical? textAlignVertical;
+  final TextInputType? keyboardType;
+  final bool autofocus;
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context) {
+    final Widget field = TextField(
+      controller: controller,
+      focusNode: focusNode,
+      expands: expands,
+      maxLines: expands ? null : maxLines,
+      minLines: expands ? null : minLines,
+      textAlignVertical: textAlignVertical,
+      keyboardType: keyboardType,
+      autofocus: autofocus,
+      enabled: enabled,
+      cursorColor: cursorColor,
+      style: textStyle,
+      onChanged: onChanged,
+      onSubmitted: onSubmitted,
+      decoration: InputDecoration(
+        isCollapsed: true,
+        border: InputBorder.none,
+        enabledBorder: InputBorder.none,
+        focusedBorder: InputBorder.none,
+        disabledBorder: InputBorder.none,
+        hintText: placeholder,
+        hintStyle: placeholderStyle,
+        contentPadding: EdgeInsets.zero,
+      ),
+    );
+
+    return GlassSurface(
+      borderRadius: BorderRadius.circular(radius),
+      finish: GlassKit.card(tint: tint ?? Colors.white, dark: dark, alpha: 0.30),
+      // The text colours are ours, not the finish's, so the label floor must not
+      // dim the glass for a label colour this surface does not use.
+      labelled: false,
+      child: Padding(
+        padding: padding,
+        child: expands
+            ? field
+            : SizedBox(height: height, child: Center(child: field)),
+      ),
+    );
+  }
+}
+
+/// The glass body of a bottom sheet: square at the bottom edge, rounded on top.
+class SkySheetSurface extends StatelessWidget {
+  const SkySheetSurface({
+    super.key,
+    required this.child,
+    required this.tint,
+    required this.dark,
+    this.padding = const EdgeInsets.fromLTRB(20, 10, 20, 24),
+  });
+
+  final Widget child;
+  final Color tint;
+  final bool dark;
+  final EdgeInsetsGeometry padding;
+
+  @override
+  Widget build(BuildContext context) => GlassSurface(
+        borderRadius: const BorderRadius.vertical(
+          top: Radius.circular(GlassRadii.sheet),
+        ),
+        finish: GlassKit.card(tint: tint, dark: dark, alpha: 0.46),
+        child: Padding(padding: padding, child: child),
+      );
+}
+
+/// Non-blocking message on glass. The previous build used Android toasts.
+class SkyToast {
+  const SkyToast._();
+
+  static void show(
+    BuildContext context, {
+    required String message,
+    Duration duration = const Duration(seconds: 2),
+  }) {
+    final OverlayState overlay = Overlay.of(context, rootOverlay: true);
+    late final OverlayEntry entry;
+    var removed = false;
+
+    void remove() {
+      if (removed) return;
+      removed = true;
+      if (entry.mounted) entry.remove();
+    }
+
+    entry = OverlayEntry(
+      builder: (BuildContext context) {
+        final ThemeData theme = Theme.of(context);
+        final bool dark = theme.brightness == Brightness.dark;
+        return Positioned(
+          left: 28,
+          right: 28,
+          bottom: 132,
+          child: IgnorePointer(
+            child: Center(
+              child: GlassSurface(
+                borderRadius: BorderRadius.circular(18),
+                finish: GlassKit.card(
+                  tint: theme.colorScheme.surface,
+                  dark: dark,
+                  alpha: 0.42,
+                ),
+                child: Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                  child: Text(
+                    message,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: theme.colorScheme.onSurface,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+
+    overlay.insert(entry);
+    Timer(duration, remove);
+  }
+}
+
+/// Two-button glass confirmation. Completes with `true` when the confirming
+/// action is taken, `false` on cancel, and null when the dim is dismissed.
+///
+/// g1455's alert draws its own label and button colours from the finish, which
+/// is exactly what a dialog wants — so this only names the copy.
+Future<bool?> showSkyConfirm({
+  required BuildContext context,
+  required String title,
+  required String message,
+  required String confirmLabel,
+  required String cancelLabel,
+  bool destructive = false,
+}) {
+  return showGlassDialog<bool>(
+    context: context,
+    builder: (BuildContext context) => GlassAlert(
+      title: Text(title),
+      message: Text(message),
+      actions: <GlassAlertAction>[
+        GlassAlertAction(
+          label: cancelLabel,
+          isDefault: !destructive,
+          onPressed: () => Navigator.pop(context, false),
+        ),
+        GlassAlertAction(
+          label: confirmLabel,
+          isDestructive: destructive,
+          onPressed: () => Navigator.pop(context, true),
+        ),
+      ],
+    ),
+  );
 }

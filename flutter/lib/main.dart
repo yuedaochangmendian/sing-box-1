@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
+import 'package:g1455/g1455.dart';
 
 import 'state/app_state.dart';
 import 'theme/sky_theme.dart';
@@ -19,15 +19,10 @@ final TextTheme kAppTextTheme = ThemeData(fontFamily: kAppFontFamily)
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // Warms the glass shaders so the first frame already shows real refraction.
-  await LiquidGlassWidgets.initialize();
-  runApp(LiquidGlassWidgets.wrap(
-    child: const SkyBoxApp(),
-    // MaterialApp users must hand the glass cascade Material's own brightness,
-    // or shadows and outlines vanish in dark mode.
-    brightnessResolver: Theme.maybeBrightnessOf,
-    adaptiveQuality: true,
-  ));
+  // Compiles the glass shaders before the first frame, so the opening screen
+  // already shows refraction instead of a flat tint that snaps in a beat later.
+  await GlassHost.precache();
+  runApp(const SkyBoxApp());
 }
 
 class SkyBoxApp extends StatefulWidget {
@@ -77,10 +72,17 @@ class _SkyBoxAppState extends State<SkyBoxApp> with WidgetsBindingObserver {
           brightness: theme.isDay ? Brightness.light : Brightness.dark,
         ),
       ),
-      // Translucent system bars: the sky gradient owns the whole screen.
-      builder: (context, child) => AnnotatedRegion<SystemUiOverlayStyle>(
-        value: theme.isDay ? SystemUiOverlayStyle.dark : SystemUiOverlayStyle.light,
-        child: child ?? const SizedBox.shrink(),
+      // The host lives above the navigator, so dialogs and sheets shown from
+      // anywhere are under it too and their glass has something to sample.
+      builder: (context, child) => GlassHost(
+        // The sky gradient decides the appearance, not the platform's switch:
+        // a phone in light mode still gets night glass over a night sky.
+        appearance: theme.isDay ? Brightness.light : Brightness.dark,
+        child: AnnotatedRegion<SystemUiOverlayStyle>(
+          // Translucent system bars: the sky gradient owns the whole screen.
+          value: theme.isDay ? SystemUiOverlayStyle.dark : SystemUiOverlayStyle.light,
+          child: child ?? const SizedBox.shrink(),
+        ),
       ),
       home: ListenableBuilder(
         listenable: _state,

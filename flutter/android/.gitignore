@@ -1,0 +1,23 @@
+gradle-wrapper.jar
+/.gradle
+/captures/
+/gradlew
+/gradlew.bat
+/local.properties
+GeneratedPluginRegistrant.java
+.cxx/
+
+# Remember to never publicly share your keystore.
+# See https://flutter.dev/to/reference-keystore
+key.properties
+**/*.keystore
+**/*.jks
+
+# The sing-box core is a 59 MB gomobile archive: copy it in before building,
+# never commit it. See android/README or the release notes for the source path.
+app/libs/*.aar
+app/libs/*-sources.jar
+signing/
+*.jks
+*.keystore
+key.properties

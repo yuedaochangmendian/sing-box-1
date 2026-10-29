@@ -237,7 +237,6 @@ class VpnController : VpnService(), PlatformInterface, CommandServerHandler, Com
                 tun = null
             }
             VpnGroups.clear()
-            notifyGroupsChanged()
             val currentCallback = callback
             if (currentCallback != null) {
                 try {
@@ -686,7 +685,6 @@ class VpnController : VpnService(), PlatformInterface, CommandServerHandler, Com
 
     override fun writeGroups(groups: OutboundGroupIterator) {
         VpnGroups.replace(groups)
-        notifyGroupsChanged()
     }
 
     override fun writeOutbounds(outbounds: OutboundGroupItemIterator) {
@@ -722,42 +720,10 @@ class VpnController : VpnService(), PlatformInterface, CommandServerHandler, Com
         @JvmField
         val ACTION_STOP = "skybox.STOP"
 
-        /** Active group-stream observer; always paired with [groupsOwner] to survive recreation. */
-        @Volatile
-        private var onGroupsChanged: (() -> Unit)? = null
-
-        /** The activity that registered [onGroupsChanged]; a stale owner never clears the new one. */
-        @Volatile
-        private var groupsOwner: Any? = null
-
         @Volatile
         private var currentClient: CommandClient? = null
 
         private val mainHandler = Handler(Looper.getMainLooper())
-
-        @JvmStatic
-        fun notifyGroupsChanged() {
-            mainHandler.post { onGroupsChanged?.invoke() }
-        }
-
-        /**
-         * Registers the group-stream observer. The owner token exists because a recreated activity
-         * can attach before the old instance is destroyed: the old onDestroy must not clear the
-         * callback that now belongs to the new instance.
-         */
-        @JvmStatic
-        fun observeGroups(owner: Any, callback: () -> Unit) {
-            groupsOwner = owner
-            onGroupsChanged = callback
-        }
-
-        /** Clears the observer only when [owner] is still the one that registered it. */
-        @JvmStatic
-        fun releaseGroups(owner: Any) {
-            if (groupsOwner !== owner) return
-            groupsOwner = null
-            onGroupsChanged = null
-        }
 
         /** Runs on a worker thread; the group stream pushes the fresh selection back. */
         @JvmStatic
@@ -820,10 +786,10 @@ class VpnController : VpnService(), PlatformInterface, CommandServerHandler, Com
 
         /** Download bytes per [SAMPLE_INTERVAL_MS] bucket, chronological, capped at [HISTORY_CAPACITY]. */
         private val HISTORY = java.util.ArrayDeque<Long>()
-        private const val SAMPLE_INTERVAL_MS = 10_000L
+        private const val SAMPLE_INTERVAL_MS = 1_000L
 
-        /** 60 buckets × 10 s = the 10-minute window the speed chart axis advertises. */
-        private const val HISTORY_CAPACITY = 60
+        /** 15 buckets × 1 s = the 15-second window the speed chart axis advertises. */
+        private const val HISTORY_CAPACITY = 15
         private var sampleAt = 0L
         private var sampleTotal = 0L
 

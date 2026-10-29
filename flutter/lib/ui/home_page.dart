@@ -9,6 +9,7 @@ import '../util/format.dart';
 import 'panel_page.dart';
 import 'widgets/glass.dart';
 import 'widgets/speed_chart.dart';
+import 'widgets/sky_sheet.dart';
 import 'dialogs/city_picker.dart';
 import 'dialogs/profile_editor.dart';
 import 'dialogs/weather_detail.dart';
@@ -306,65 +307,32 @@ class _SpeedCard extends StatelessWidget {
         children: <Widget>[
           Text(sentence, style: TextStyle(fontSize: 15, color: textColor)),
           const SizedBox(height: 12),
+          SpeedChart(
+            samples: running ? app.speedHistory : const <int>[],
+            slotCount: app.sampleCapacity,
+            lineColor: const Color(0xF2BEE5FF),
+            gridColor: textColor.withAlpha(0x26),
+            height: 104,
+          ),
+          const SizedBox(height: 6),
           Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: <Widget>[
-              Expanded(
-                child: SpeedChart(
-                  samples: running ? app.speedHistory : const <int>[],
-                  slotCount: app.sampleCapacity,
-                  separatorSlots: app.sampleCapacity ~/ 2,
-                  barColor: const Color(0xF2BEE5FF),
-                  barLowColor: const Color(0x8C7FBDF0),
-                  gridColor: textColor.withAlpha(0x26),
+              Text(
+                '15 秒前',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: theme.secondaryTextColor.withAlpha(0xCC),
                 ),
               ),
-              const SizedBox(width: 6),
-              SizedBox(
-                width: 26,
-                height: 92,
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: <Widget>[
-                    for (final label in const <String>['快', '中', '慢'])
-                      Center(
-                        child: Text(
-                          label,
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: theme.secondaryTextColor.withAlpha(0xAA),
-                          ),
-                        ),
-                      ),
-                  ],
+              Text(
+                '现在',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: theme.secondaryTextColor.withAlpha(0xCC),
                 ),
               ),
             ],
-          ),
-          const SizedBox(height: 8),
-          Padding(
-            padding: const EdgeInsets.only(right: 32),
-            child: Row(
-              children: <Widget>[
-                for (final entry in const <(String, Alignment)>[
-                  ('10分钟前', Alignment.centerLeft),
-                  ('5分钟前', Alignment.center),
-                  ('现在', Alignment.centerRight),
-                ])
-                  Expanded(
-                    child: Align(
-                      alignment: entry.$2,
-                      child: Text(
-                        entry.$1,
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: theme.secondaryTextColor.withAlpha(0xCC),
-                        ),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
           ),
         ],
       ),
@@ -389,6 +357,7 @@ class _GroupsCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final groups = app.groups;
     final live = app.liveGroups;
+    if (groups.isEmpty) return const SizedBox.shrink();
     return SkyGlassCard(
       tint: theme.cardColor,
       dark: !theme.isDay,
@@ -396,14 +365,6 @@ class _GroupsCard extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
       child: Column(
         children: <Widget>[
-          if (groups.isEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              child: Text(
-                '当前配置没有策略组。导入包含 selector 或 urltest 出站的配置后，可在这里直接切换节点。',
-                style: TextStyle(fontSize: 13, color: theme.secondaryTextColor),
-              ),
-            ),
           if (groups.isNotEmpty && live.isEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(0, 8, 0, 4),
@@ -620,31 +581,33 @@ class HomeControls extends StatelessWidget {
 
   void _openMenu(BuildContext context) {
     final app = this.app;
-    showGlassActionSheet<void>(
+    final theme = this.theme;
+    showSkySheet<void>(
       context: context,
       cancelLabel: '取消',
-      actions: <GlassActionSheetAction>[
-        GlassActionSheetAction(
+      theme: theme,
+      actions: <SkySheetAction>[
+        SkySheetAction(
           label: '配置管理',
           icon: const Icon(Icons.folder_outlined),
           onPressed: () => _openPanel(context, app, 0),
         ),
-        GlassActionSheetAction(
+        SkySheetAction(
           label: '活动日志',
           icon: const Icon(Icons.show_chart),
           onPressed: () => _openPanel(context, app, 1),
         ),
-        GlassActionSheetAction(
+        SkySheetAction(
           label: '设置',
           icon: const Icon(Icons.settings_outlined),
           onPressed: () => _openPanel(context, app, 2),
         ),
-        GlassActionSheetAction(
+        SkySheetAction(
           label: '天气详情',
           icon: const Icon(Icons.cloud_outlined),
           onPressed: () => openWeatherDetail(context, app),
         ),
-        GlassActionSheetAction(
+        SkySheetAction(
           label: '刷新节点地区',
           icon: const Icon(Icons.my_location),
           onPressed: () async {
@@ -662,11 +625,13 @@ class HomeControls extends StatelessWidget {
 
   void _openAdd(BuildContext context) {
     final app = this.app;
-    showGlassActionSheet<void>(
+    final theme = this.theme;
+    showSkySheet<void>(
       context: context,
       cancelLabel: '取消',
-      actions: <GlassActionSheetAction>[
-        GlassActionSheetAction(
+      theme: theme,
+      actions: <SkySheetAction>[
+        SkySheetAction(
           label: '从文件导入 JSON',
           icon: const Icon(Icons.file_open_outlined),
           onPressed: () async {
@@ -676,7 +641,7 @@ class HomeControls extends StatelessWidget {
             }
           },
         ),
-        GlassActionSheetAction(
+        SkySheetAction(
           label: '新建空白配置',
           icon: const Icon(Icons.note_add_outlined),
           onPressed: () {

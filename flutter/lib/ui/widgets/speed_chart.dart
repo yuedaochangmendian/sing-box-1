@@ -1,29 +1,23 @@
 import 'package:flutter/material.dart';
 
-/// Download throughput for the last [slotCount] × 10 s buckets.
-///
-/// Fixed slot count on purpose: the axis labels (10分钟前 / 5分钟前 / 现在) only
-/// stay honest when every slot always means the same amount of time. Samples
-/// are right-aligned so the newest bucket sits on the "现在" edge, which means a
-/// freshly connected tunnel shows a short curve on the right instead of a
+/// Download throughput for the last [slotCount] one-second buckets, drawn as a
+/// line chart. Fixed slot count on purpose: every slot always means the same
+/// amount of time, so the axis labels stay honest. Samples are right-aligned so
+/// a freshly connected tunnel shows a short curve on the right instead of a
 /// misleading full-width one.
 class SpeedChart extends StatelessWidget {
   const SpeedChart({
     super.key,
     required this.samples,
     required this.slotCount,
-    required this.separatorSlots,
-    required this.barColor,
-    required this.barLowColor,
+    required this.lineColor,
     required this.gridColor,
-    this.height = 92,
+    this.height = 104,
   });
 
   final List<int> samples;
   final int slotCount;
-  final int separatorSlots;
-  final Color barColor;
-  final Color barLowColor;
+  final Color lineColor;
   final Color gridColor;
   final double height;
 
@@ -35,30 +29,34 @@ class SpeedChart extends StatelessWidget {
           painter: _SpeedChartPainter(
             samples: samples,
             slotCount: slotCount,
-            separatorSlots: separatorSlots,
-            barColor: barColor,
-            barLowColor: barLowColor,
+            lineColor: lineColor,
             gridColor: gridColor,
           ),
         ),
       );
 }
 
+String _shortRate(int value) {
+  if (value <= 0) return '0';
+  if (value < 1024) return '${value}B';
+  if (value < 1024 * 1024) return '${(value / 1024).round()}K';
+  if (value < 1024 * 1024 * 1024) {
+    return '${(value / (1024 * 1024)).toStringAsFixed(1)}M';
+  }
+  return '${(value / (1024 * 1024 * 1024)).toStringAsFixed(1)}G';
+}
+
 class _SpeedChartPainter extends CustomPainter {
   const _SpeedChartPainter({
     required this.samples,
     required this.slotCount,
-    required this.separatorSlots,
-    required this.barColor,
-    required this.barLowColor,
+    required this.lineColor,
     required this.gridColor,
   });
 
   final List<int> samples;
   final int slotCount;
-  final int separatorSlots;
-  final Color barColor;
-  final Color barLowColor;
+  final Color lineColor;
   final Color gridColor;
 
   @override
@@ -80,39 +78,76 @@ class _SpeedChartPainter extends CustomPainter {
     }
     if (peak <= 0) return;
 
+    const labelReserve = 14.0;
+    final plotHeight = size.height - labelReserve;
     final slotWidth = size.width / slotCount;
-    final barWidth = (slotWidth * 0.62).clamp(1.0, 10.0);
     // Right-align the samples; a young tunnel has fewer buckets than slots.
     final offset = slotCount - count;
-    final paint = Paint()..isAntiAlias = true;
 
+    final points = <Offset>[];
     for (var i = 0; i < count; i++) {
       final value = samples[i];
       final ratio = value / peak;
-      final barHeight = (size.height * 0.9 * ratio).clamp(1.0, size.height * 0.9);
-      final x = (offset + i) * slotWidth + (slotWidth - barWidth) / 2;
-      final top = size.height - barHeight;
-      final rect = RRect.fromRectAndRadius(
-        Rect.fromLTWH(x, top, barWidth, barHeight),
-        Radius.circular(barWidth / 2),
-      );
-      // The lower third of the range reads as "slow" and gets the muted colour.
-      paint.color = ratio < 0.34 ? barLowColor : barColor;
-      canvas.drawRRect(rect, paint);
+      final x = (offset + i) * slotWidth + slotWidth / 2;
+      final y = plotHeight - plotHeight * 0.92 * ratio.clamp(0.0, 1.0);
+      points.add(Offset(x, y));
     }
 
-    if (separatorSlots <= 0 || separatorSlots >= slotCount) return;
-    final marker = Paint()
-      ..color = gridColor
-      ..strokeWidth = 1;
-    final x = (slotCount - separatorSlots) * slotWidth;
-    canvas.drawLine(Offset(x, 0), Offset(x, size.height), marker);
+    // Subtle area fill under the line.
+    final fill = Paint()
+      ..color = lineColor.withAlpha(0x1F)
+      ..style = PaintingStyle.fill;
+    final area = Path()
+      ..moveTo(points.first.dx, plotHeight)
+      ..addPolygon(points, false)
+      ..lineTo(points.last.dx, plotHeight)
+      ..close();
+    canvas.drawPath(area, fill);
+
+    // The polyline itself.
+    final line = Paint()
+      ..color = lineColor
+      ..strokeWidth = 2
+      ..strokeJoin = StrokeJoin.round
+      ..strokeCap = StrokeCap.round
+      ..style = PaintingStyle.stroke;
+    final path = Path()..moveTo(points.first.dx, points.first.dy);
+    for (var i = 1; i < points.length; i++) {
+      path.lineTo(points[i].dx, points[i].dy);
+    }
+    canvas.drawPath(path, line);
+
+    // Vertex dots + compact speed labels, skipping labels that would overlap.
+    final dot = Paint()..color = lineColor;
+    final labelStyle = TextStyle(
+      fontSize: 8,
+      color: lineColor,
+      fontWeight: FontWeight.w600,
+    );
+    var lastLabelX = double.negativeInfinity;
+    for (var i = 0; i < points.length; i++) {
+      final p = points[i];
+      canvas.drawCircle(p, 2.2, dot);
+      final label = _shortRate(samples[i]);
+      final span = TextSpan(text: label, style: labelStyle);
+      final tp = TextPainter(
+        text: span,
+        textDirection: TextDirection.ltr,
+        textAlign: TextAlign.center,
+      )..layout();
+      final labelX = (p.dx - tp.width / 2).clamp(0.0, size.width - tp.width);
+      if (labelX - lastLabelX >= tp.width + 2) {
+        final labelY = (p.dy - tp.height - 3).clamp(0.0, plotHeight);
+        tp.paint(canvas, Offset(labelX, labelY));
+        lastLabelX = labelX;
+      }
+    }
   }
 
   @override
   bool shouldRepaint(covariant _SpeedChartPainter oldDelegate) =>
       oldDelegate.samples != samples ||
       oldDelegate.slotCount != slotCount ||
-      oldDelegate.barColor != barColor ||
+      oldDelegate.lineColor != lineColor ||
       oldDelegate.gridColor != gridColor;
 }

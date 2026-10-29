@@ -19,8 +19,10 @@ android {
         applicationId = "io.github.yuedaochangmendian.skybox"
         minSdk = 24
         targetSdk = 35
-        versionCode = 7
-        versionName = "3.0.0"
+        // Version comes from pubspec.yaml (flutter.versionCode/versionName are
+        // injected by the Flutter Gradle plugin); fallbacks match the current release.
+        versionCode = flutter.versionCode ?: 9
+        versionName = flutter.versionName ?: "3.0.2"
         ndk {
             // Release ships arm64 only; pass -PskyboxAbi=x86_64 for local emulator builds.
             abiFilters += listOf(project.findProperty("skyboxAbi") as? String ?: "arm64-v8a")

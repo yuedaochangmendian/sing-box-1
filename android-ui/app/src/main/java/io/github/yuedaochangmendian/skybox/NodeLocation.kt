@@ -49,29 +49,48 @@ object NodeLocation {
     var lastAttemptAt = 0L
         private set
 
+    /**
+     * True when the tunnel came up or went down while the request was in flight, so the answer
+     * belongs to a different route than the one the app is on now. The reading is discarded and
+     * [lastAttemptAt] is cleared so the caller may retry immediately.
+     */
+    @Volatile
+    var routeChanged = false
+        private set
+
     @JvmStatic
     @Synchronized
     fun probe(complete: (() -> Unit)? = null) {
         if (probing) return
         probing = true
+        routeChanged = false
+        // Capture the route before the request: deciding afterwards would label a direct reading
+        // as a node reading whenever the VPN connects in the meantime.
+        val tunnelAtRequest = VpnController.running
         Thread({
             var result: Location? = null
             var failure = ""
             for (endpoint in ENDPOINTS) {
                 try {
-                    result = fetch(endpoint.first, endpoint.second)
-                    if (result != null) break
+                    result = fetch(endpoint.first, tunnelAtRequest, endpoint.second)
+                    break
                 } catch (error: Exception) {
                     failure = error.message ?: error.javaClass.simpleName
-                    if (Thread.currentThread().isInterrupted) break
+                    if (routeChanged || Thread.currentThread().isInterrupted) break
                 }
             }
             lastAttemptAt = System.currentTimeMillis()
-            if (result != null) {
-                last = result
-                lastError = ""
-            } else if (failure.isNotEmpty()) {
-                lastError = failure
+            when {
+                routeChanged -> {
+                    // Keep the previous reading untouched and let the caller re-probe right away.
+                    lastError = "网络路径已变化"
+                    lastAttemptAt = 0L
+                }
+                result != null -> {
+                    last = result
+                    lastError = ""
+                }
+                failure.isNotEmpty() -> lastError = failure
             }
             probing = false
             complete?.invoke()
@@ -83,7 +102,7 @@ object NodeLocation {
     var fromNode = false
         private set
 
-    private fun fetch(address: String, parse: (JSONObject) -> Location): Location {
+    private fun fetch(address: String, tunnelAtRequest: Boolean, parse: (JSONObject) -> Location): Location {
         val connection = URL(address).openConnection() as HttpURLConnection
         try {
             connection.connectTimeout = TIMEOUT_MS
@@ -109,11 +128,14 @@ object NodeLocation {
                     if (document.optBoolean("error", false)) throw java.io.IOException("节点地区查询被拒绝")
                     val location = parse(document)
                     if (!location.isValid) throw java.io.IOException("节点地区数据无效")
-                    fromNode = VpnController.running
+                    if (VpnController.running != tunnelAtRequest) {
+                        routeChanged = true
+                        throw java.io.IOException("网络路径已变化")
+                    }
+                    fromNode = tunnelAtRequest
                     return location
                 }
             }
-            throw java.io.IOException("节点地区响应为空")
         } finally {
             connection.disconnect()
         }

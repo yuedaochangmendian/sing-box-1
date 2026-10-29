@@ -63,6 +63,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executor
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.TimeUnit
 
 class VpnController : VpnService(), PlatformInterface, CommandServerHandler, CommandClientHandler {
@@ -96,13 +97,13 @@ class VpnController : VpnService(), PlatformInterface, CommandServerHandler, Com
         latestStartId = startId
         if (intent != null && ACTION_STOP == intent.action) {
             state = "正在断开"
-            worker.execute {
+            submit {
                 stopCore()
                 finishRequest(startId)
             }
         } else {
             foreground("正在连接")
-            worker.execute { if (!destroyed && latestStartId == startId && owner === this) startCore(startId) }
+            submit { if (!destroyed && latestStartId == startId && owner === this) startCore(startId) }
         }
         return Service.START_NOT_STICKY
     }
@@ -178,6 +179,8 @@ class VpnController : VpnService(), PlatformInterface, CommandServerHandler, Com
             options.addCommand(Libbox.CommandStatus)
             options.addCommand(Libbox.CommandLog)
             options.addCommand(Libbox.CommandGroup)
+            // Per-outbound delay updates: WriteOutbounds only fires when this command is subscribed.
+            options.addCommand(Libbox.CommandOutbounds)
             options.setStatusInterval(1000000000L)
             val createdClient = Libbox.newCommandClient(this, options)
             client = createdClient
@@ -260,7 +263,7 @@ class VpnController : VpnService(), PlatformInterface, CommandServerHandler, Com
     }
 
     override fun onRevoke() {
-        worker.execute {
+        submit {
             stopCore()
             finishRequest(latestStartId)
         }
@@ -271,8 +274,8 @@ class VpnController : VpnService(), PlatformInterface, CommandServerHandler, Com
         running = false
         state = "已断开"
         if (owner === this) owner = null
-        worker.execute { stopCore() }
-        worker.shutdown()
+        submit { stopCore() }
+        // The worker is process-wide: shutting it down here would kill every later service instance.
         super.onDestroy()
     }
 
@@ -632,14 +635,14 @@ class VpnController : VpnService(), PlatformInterface, CommandServerHandler, Com
     }
 
     override fun serviceStop() {
-        worker.execute {
+        submit {
             stopCore()
             finishRequest(latestStartId)
         }
     }
 
     override fun serviceReload() {
-        worker.execute {
+        submit {
             stopCore()
             finishRequest(latestStartId)
         }
@@ -688,7 +691,8 @@ class VpnController : VpnService(), PlatformInterface, CommandServerHandler, Com
 
     override fun writeOutbounds(outbounds: OutboundGroupItemIterator) {
         VpnGroups.patchDelays(outbounds)
-        notifyGroupsChanged()
+        // Delay patches arrive in bursts during a urlTest; the 1-second ticker re-reads
+        // VpnGroups.revision and renders once instead of rebuilding the rows per patch.
     }
 
     override fun writeLogs(entries: LogIterator) {
@@ -718,9 +722,13 @@ class VpnController : VpnService(), PlatformInterface, CommandServerHandler, Com
         @JvmField
         val ACTION_STOP = "skybox.STOP"
 
-        /** Set by the activity; invoked on the main thread whenever the group stream delivers. */
+        /** Active group-stream observer; always paired with [groupsOwner] to survive recreation. */
         @Volatile
-        var onGroupsChanged: (() -> Unit)? = null
+        private var onGroupsChanged: (() -> Unit)? = null
+
+        /** The activity that registered [onGroupsChanged]; a stale owner never clears the new one. */
+        @Volatile
+        private var groupsOwner: Any? = null
 
         @Volatile
         private var currentClient: CommandClient? = null
@@ -732,14 +740,33 @@ class VpnController : VpnService(), PlatformInterface, CommandServerHandler, Com
             mainHandler.post { onGroupsChanged?.invoke() }
         }
 
+        /**
+         * Registers the group-stream observer. The owner token exists because a recreated activity
+         * can attach before the old instance is destroyed: the old onDestroy must not clear the
+         * callback that now belongs to the new instance.
+         */
+        @JvmStatic
+        fun observeGroups(owner: Any, callback: () -> Unit) {
+            groupsOwner = owner
+            onGroupsChanged = callback
+        }
+
+        /** Clears the observer only when [owner] is still the one that registered it. */
+        @JvmStatic
+        fun releaseGroups(owner: Any) {
+            if (groupsOwner !== owner) return
+            groupsOwner = null
+            onGroupsChanged = null
+        }
+
         /** Runs on a worker thread; the group stream pushes the fresh selection back. */
         @JvmStatic
         fun selectOutbound(groupTag: String, outboundTag: String, onError: (String) -> Unit) {
-            worker.execute {
+            submit {
                 val target = currentClient
                 if (target == null) {
                     mainHandler.post { onError("VPN 未运行") }
-                    return@execute
+                    return@submit
                 }
                 try {
                     target.selectOutbound(groupTag, outboundTag)
@@ -752,7 +779,7 @@ class VpnController : VpnService(), PlatformInterface, CommandServerHandler, Com
 
         @JvmStatic
         fun urlTest(outboundTag: String) {
-            worker.execute {
+            submit {
                 try {
                     currentClient?.urlTest(outboundTag)
                 } catch (ignored: Exception) {
@@ -791,13 +818,37 @@ class VpnController : VpnService(), PlatformInterface, CommandServerHandler, Com
         private val LOCK = Any()
         private val LOGS = java.util.ArrayDeque<String>()
 
-        /** Download bytes per [SAMPLE_INTERVAL_MS] bucket, chronological, capped at 12 minutes. */
+        /** Download bytes per [SAMPLE_INTERVAL_MS] bucket, chronological, capped at [HISTORY_CAPACITY]. */
         private val HISTORY = java.util.ArrayDeque<Long>()
         private const val SAMPLE_INTERVAL_MS = 10_000L
-        private const val HISTORY_CAPACITY = 72
+
+        /** 60 buckets × 10 s = the 10-minute window the speed chart axis advertises. */
+        private const val HISTORY_CAPACITY = 60
         private var sampleAt = 0L
         private var sampleTotal = 0L
-        private val worker: ExecutorService = Executors.newSingleThreadExecutor()
+
+        private val workerLock = Any()
+
+        @Volatile
+        private var worker: ExecutorService = Executors.newSingleThreadExecutor()
+
+        private fun workerExecutor(): ExecutorService = synchronized(workerLock) {
+            if (worker.isShutdown) worker = Executors.newSingleThreadExecutor()
+            worker
+        }
+
+        /**
+         * Queues service work without ever throwing. A task submitted while the old service instance
+         * tears its executor down is dropped instead of raising RejectedExecutionException on the
+         * caller's thread.
+         */
+        private fun submit(task: () -> Unit) {
+            try {
+                workerExecutor().execute(task)
+            } catch (ignored: RejectedExecutionException) {
+            }
+        }
+
         private val DIRECT_EXECUTOR: Executor = Executor { command -> command.run() }
 
         @Volatile
@@ -811,6 +862,10 @@ class VpnController : VpnService(), PlatformInterface, CommandServerHandler, Com
 
         @JvmStatic
         fun speedSampleIntervalMs(): Long = SAMPLE_INTERVAL_MS
+
+        /** One slot per [SAMPLE_INTERVAL_MS]; the chart prints every slot so the labels stay honest. */
+        @JvmStatic
+        fun speedSampleCapacity(): Int = HISTORY_CAPACITY
 
         private fun log(value: String) {
             synchronized(LOCK) {

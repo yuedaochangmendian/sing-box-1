@@ -4,19 +4,16 @@ import android.Manifest
 import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Insets
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
-import android.graphics.drawable.RippleDrawable
 import android.net.Uri
 import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.os.SystemClock
 import android.provider.OpenableColumns
 import android.text.TextUtils
 import android.text.Spannable
@@ -74,7 +71,6 @@ class MainActivity : Activity() {
     private var speedChart: PrecipitationChartView? = null
     private var groupsRows: LinearLayout? = null
     private var weatherError: TextView? = null
-    private var renderedWeather = ""
     private var renderedGroupRevision = -1L
     private val expandedGroups = HashSet<String>()
     private var staticGroupCache: Pair<String, List<GroupSnapshot>>? = null
@@ -105,8 +101,6 @@ class MainActivity : Activity() {
     private var resumed = false
     private var lastLogs: String? = null
     private var tickCount = 0
-    private var lastRunning = false
-    private var lastProbeElapsed = 0L
 
     private val ticker = object : Runnable {
         override fun run() {
@@ -120,6 +114,10 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Restores the dock selection together with the "tab" entry written in onSaveInstanceState.
+        if (savedInstanceState != null) {
+            selectedTab = savedInstanceState.getInt("tab", 0).coerceIn(0, 2)
+        }
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         window.statusBarColor = Color.TRANSPARENT
         window.navigationBarColor = 0xFF72B3E9.toInt()
@@ -187,7 +185,7 @@ class MainActivity : Activity() {
         backdrop.setTheme(theme)
         buildWeatherScreen()
         buildPanel()
-        VpnController.onGroupsChanged = { renderGroups() }
+        VpnController.observeGroups(this) { if (!isFinishing && !isDestroyed) renderGroups() }
         worker.execute {
             try {
                 CoreRuntime.ensureInit(applicationContext)
@@ -225,7 +223,7 @@ class MainActivity : Activity() {
         val dialog = cityDialog
         if (dialog != null && dialog.isShowing) dialog.dismiss()
         weatherService?.close()
-        VpnController.onGroupsChanged = null
+        VpnController.releaseGroups(this)
         worker.shutdown()
         super.onDestroy()
     }
@@ -261,10 +259,12 @@ class MainActivity : Activity() {
     private fun buildPanelClose() {
         val close = text("✕", 17f, WHITE)
         close.setGravity(Gravity.CENTER)
-        close.background = RippleDrawable(
-            ColorStateList.valueOf(0x33FFFFFF),
-            round(withAlpha(theme.cardColor, 0xCC), 20),
-            round(WHITE, 20),
+        close.applyLiquidGlass(
+            style = Glass.Style.CLEAR,
+            radiusDp = Glass.RADIUS_CONTROL_DP,
+            surface = theme.cardColor,
+            surfaceAlpha = 0.62f,
+            dark = !theme.isDay,
         )
         close.contentDescription = "关闭配置面板"
         close.setOnClickListener { closePanel() }
@@ -303,12 +303,18 @@ class MainActivity : Activity() {
      */
     private fun buildFloatingButtons() {
         val size = dp(54)
-        val ripple = ColorStateList.valueOf(0x33FFFFFF)
         val left = ImageView(this)
         left.setImageResource(R.drawable.ic_panel)
         left.scaleType = ImageView.ScaleType.CENTER
         left.setColorFilter(theme.iconColor)
-        left.background = RippleDrawable(ripple, oval(withAlpha(theme.cardColor, 0xD9)), oval(WHITE))
+        left.applyLiquidGlass(
+            style = Glass.Style.CLEAR,
+            radiusDp = 27,
+            surface = theme.cardColor,
+            surfaceAlpha = 0.78f,
+            dark = !theme.isDay,
+            elevationDp = 6,
+        )
         left.contentDescription = "打开菜单"
         left.setOnClickListener {
             showAnchoredMenu(
@@ -332,7 +338,14 @@ class MainActivity : Activity() {
         right.setImageResource(R.drawable.ic_add)
         right.scaleType = ImageView.ScaleType.CENTER
         right.setColorFilter(theme.iconColor)
-        right.background = RippleDrawable(ripple, oval(withAlpha(theme.cardColor, 0xD9)), oval(WHITE))
+        right.applyLiquidGlass(
+            style = Glass.Style.CLEAR,
+            radiusDp = 27,
+            surface = theme.cardColor,
+            surfaceAlpha = 0.78f,
+            dark = !theme.isDay,
+            elevationDp = 6,
+        )
         right.contentDescription = "添加配置"
         right.setOnClickListener {
             showAnchoredMenu(
@@ -358,10 +371,18 @@ class MainActivity : Activity() {
     }
 
     private fun paintFloatingButtons() {
-        val ripple = ColorStateList.valueOf(0x33FFFFFF)
-        val surface = oval(withAlpha(theme.cardColor, 0xD9))
-        floatLeft.background = RippleDrawable(ripple, surface, oval(WHITE))
-        floatRight.background = RippleDrawable(ripple, oval(withAlpha(theme.cardColor, 0xD9)), oval(WHITE))
+        // Theme updates can arrive before the circles exist; nothing to repaint in that case.
+        if (!::floatLeft.isInitialized || !::floatRight.isInitialized) return
+        for (button in arrayOf(floatLeft, floatRight)) {
+            button.applyLiquidGlass(
+                style = Glass.Style.CLEAR,
+                radiusDp = 27,
+                surface = theme.cardColor,
+                surfaceAlpha = 0.78f,
+                dark = !theme.isDay,
+                elevationDp = 6,
+            )
+        }
     }
 
     private fun openPanelToTab(tab: Int) {
@@ -383,7 +404,6 @@ class MainActivity : Activity() {
         speedChart = null
         groupsRows = null
         weatherError = null
-        renderedWeather = ""
         renderedGroupRevision = -1L
         val content = column()
         content.setPadding(dp(16), dp(22), dp(16), dp(148))
@@ -435,7 +455,7 @@ class MainActivity : Activity() {
         latency.setOnClickListener { onLatencyPillClicked() }
         latencyPillText = latency.getChildAt(1) as TextView
         pills.addView(latency, LinearLayout.LayoutParams(-2, dp(40)))
-        val start = pill(R.drawable.ic_play, "启动")
+        val start = pill(R.drawable.ic_play, "启动", Glass.Style.TINTED)
         start.setOnClickListener {
             if (VpnController.running) stopConnection() else beginStart()
         }
@@ -447,7 +467,7 @@ class MainActivity : Activity() {
         content.addView(pills, full())
 
         space(content, 72)
-        val speed = glassCard(withAlpha(mix(theme.cardColor, theme.getGradientColors()[0], 0.30f), 0xC8))
+        val speed = glassCard(mix(theme.cardColor, theme.getGradientColors()[0], 0.30f), 0.78f)
         val sentence = text("未连接 · 连接后显示实时网速", 15f, theme.textColor)
         speedSentence = sentence
         speed.addView(sentence, full())
@@ -456,6 +476,10 @@ class MainActivity : Activity() {
         val chart = PrecipitationChartView(this)
         chart.setBarColors(0xF2BEE5FF.toInt(), 0x8C7FBDF0.toInt())
         chart.setGridColor(withAlpha(theme.textColor, 0x26))
+        // Fixed 10-minute window (60 × 10 s), newest bar on the right edge; the timeline labels
+        // below (10分钟前 / 5分钟前 / 现在) only stay true with a fixed slot count.
+        chart.setSlotCount(VpnController.speedSampleCapacity())
+        chart.setSeparatorSlots(30)
         speedChart = chart
         chartRow.addView(chart, LinearLayout.LayoutParams(0, dp(92), 1f))
         val axis = column()
@@ -482,7 +506,7 @@ class MainActivity : Activity() {
         content.addView(speed, full())
 
         space(content, 14)
-        val groups = glassCard(withAlpha(theme.cardColor, 0xB0))
+        val groups = glassCard(theme.cardColor, 0.60f)
         groups.setPadding(dp(16), dp(6), dp(16), dp(6))
         val rows = column()
         groupsRows = rows
@@ -490,40 +514,47 @@ class MainActivity : Activity() {
         content.addView(groups, full())
     }
 
-    private fun pill(iconRes: Int, label: String): LinearLayout {
+    /**
+     * Capsule control in the reference kit: CLEAR for secondary pills (latency), TINTED for the
+     * primary action. Tinted surfaces switch to white glyphs, since the accent is dark enough that
+     * the weather text colour would lose contrast.
+     */
+    private fun pill(iconRes: Int, label: String, style: Glass.Style = Glass.Style.CLEAR): LinearLayout {
         val container = LinearLayout(this)
         container.orientation = LinearLayout.HORIZONTAL
         container.gravity = Gravity.CENTER_VERTICAL
         container.setPadding(dp(14), 0, dp(16), 0)
-        container.background = RippleDrawable(
-            ColorStateList.valueOf(0x33FFFFFF),
-            round(withAlpha(theme.cardColor, 0xC4), 20),
-            round(WHITE, 20),
+        val tinted = style == Glass.Style.TINTED
+        container.applyLiquidGlass(
+            style = style,
+            radiusDp = Glass.RADIUS_CONTROL_DP,
+            surface = if (tinted) Glass.accent(!theme.isDay) else theme.cardColor,
+            surfaceAlpha = if (tinted) 0.92f else 0.66f,
+            dark = !theme.isDay,
         )
         val icon = ImageView(this)
         icon.setImageResource(iconRes)
-        icon.setColorFilter(theme.textColor)
+        icon.setColorFilter(if (tinted) Color.WHITE else theme.textColor)
         container.addView(icon, LinearLayout.LayoutParams(dp(15), dp(15)))
-        val value = text(label, 14f, WHITE)
+        val value = text(label, 14f, if (tinted) 0xF7FFFFFF.toInt() else WHITE)
         val params = LinearLayout.LayoutParams(-2, -2)
         params.leftMargin = dp(7)
         container.addView(value, params)
         return container
     }
 
-    /** Glass card with its own colour weight so the home cards do not read as one flat block. */
-    private fun glassCard(surface: Int): LinearLayout {
+    /** Frosted glass card; [surfaceAlpha] keeps the sky visible without washing out the content. */
+    private fun glassCard(surface: Int, surfaceAlpha: Float): LinearLayout {
         val container = column()
         container.setPadding(dp(16), dp(15), dp(16), dp(15))
-        container.background = round(surface, 22)
+        container.applyLiquidGlassSurface(
+            style = Glass.Style.REGULAR,
+            radiusDp = Glass.RADIUS_CARD_DP,
+            surface = surface,
+            surfaceAlpha = surfaceAlpha,
+            dark = !theme.isDay,
+        )
         return container
-    }
-
-    private fun oval(color: Int): GradientDrawable {
-        val background = GradientDrawable()
-        background.shape = GradientDrawable.OVAL
-        background.setColor(color)
-        return background
     }
 
     private fun buildProfiles() {
@@ -717,8 +748,14 @@ class MainActivity : Activity() {
     private fun buildDock() {
         val bar = row()
         bar.setPadding(dp(T_DOCK_PAD), dp(T_DOCK_PAD), dp(T_DOCK_PAD), dp(T_DOCK_PAD))
-        bar.background = round(withAlpha(theme.dockColor, 0xE6), 40)
-        bar.elevation = dp(6).toFloat()
+        bar.applyLiquidGlass(
+            style = Glass.Style.CLEAR,
+            radiusDp = Glass.RADIUS_DOCK_DP,
+            surface = theme.dockColor,
+            surfaceAlpha = 0.84f,
+            dark = !theme.isDay,
+            elevationDp = 6,
+        )
         val names = arrayOf("配置", "活动", "设置")
         val icons = intArrayOf(
             R.drawable.nav_cities,
@@ -791,34 +828,43 @@ class MainActivity : Activity() {
     /**
      * Automatic refresh cadence from the 1-second ticker: one latency probe and one node-region
      * probe every 30 s / 5 min while connected, plus an immediate pair when the tunnel comes up.
+     * The "came up" edge is tracked in a process-wide flag, so merely opening the app while the
+     * tunnel is already up no longer re-runs the detection toast.
      */
     private fun keepReadingsFresh() {
         val running = VpnController.running
-        if (running && !lastRunning) {
+        if (running && !lastRunningObserved) {
             LatencyProbe.test()
             refreshNodeRegion(true)
         }
-        lastRunning = running
+        lastRunningObserved = running
         if (!running) return
         if (tickCount % 30 == 0 && !LatencyProbe.testing) LatencyProbe.test()
-        if (!NodeLocation.probing && SystemClock.elapsedRealtime() - lastProbeElapsed > FIVE_MINUTES_MS) {
+        // Throttled by the probe itself, which also survives an activity recreation.
+        if (!NodeLocation.probing && System.currentTimeMillis() - NodeLocation.lastAttemptAt > FIVE_MINUTES_MS) {
             refreshNodeRegion(false)
         }
     }
 
-    /** manual=true always probes; otherwise the caller's throttle decides. */
+    /** manual=true always toasts; otherwise the caller's throttle decides. */
     internal fun refreshNodeRegion(manual: Boolean) {
         if (NodeLocation.probing) return
-        lastProbeElapsed = SystemClock.elapsedRealtime()
         if (manual) toast("正在检测节点地区…")
         NodeLocation.probe {
             handler.post {
                 if (isFinishing || isDestroyed) return@post
+                if (NodeLocation.routeChanged) {
+                    // The tunnel went up or down mid-request; the answer describes the other route.
+                    if (manual) toast("网络刚切换，稍后重新检测节点地区")
+                    return@post
+                }
                 val node = NodeLocation.last
                 if (node == null || !node.isValid) {
                     if (manual) toast("节点地区检测失败：" + NodeLocation.lastError)
                     return@post
                 }
+                // Last line of defence: never attach a reading to the wrong route.
+                if (NodeLocation.fromNode != VpnController.running) return@post
                 applyNodeLocation(node)
             }
         }
@@ -856,7 +902,17 @@ class MainActivity : Activity() {
             return
         }
         if (live.isEmpty()) {
-            val note = text("未连接 · 显示配置中的策略组，连接后可切换与测速", 12f, SOFT)
+            // A connected config can still fall back to the static list (for example while the
+            // group stream is still connecting), so saying "未连接" there is simply wrong.
+            val note = text(
+                if (VpnController.running) {
+                    "策略组状态同步中 · 显示配置中的策略组"
+                } else {
+                    "未连接 · 显示配置中的策略组，连接后可切换与测速"
+                },
+                12f,
+                SOFT,
+            )
             note.setPadding(0, dp(8), 0, dp(4))
             rows.addView(note, full())
         }
@@ -1329,7 +1385,14 @@ class MainActivity : Activity() {
     private fun card(): LinearLayout {
         val container = column()
         container.setPadding(dp(16), dp(14), dp(16), dp(14))
-        container.background = round(withAlpha(theme.cardColor, 0xE8), 22)
+        // Content cards sit a little denser than the home cards so body text stays comfortable.
+        container.applyLiquidGlassSurface(
+            style = Glass.Style.REGULAR,
+            radiusDp = Glass.RADIUS_CARD_DP,
+            surface = theme.cardColor,
+            surfaceAlpha = 0.88f,
+            dark = !theme.isDay,
+        )
         return container
     }
 
@@ -1369,7 +1432,6 @@ class MainActivity : Activity() {
             val message = state?.errorMessage.orEmpty()
             weatherError?.text = message
             weatherError?.visibility = if (message.isEmpty()) View.GONE else View.VISIBLE
-            if (renderedWeather != "none") renderedWeather = "none"
             return
         }
         val current = state!!
@@ -1389,11 +1451,6 @@ class MainActivity : Activity() {
         weatherError?.text = message
         weatherError?.visibility = if (message.isEmpty()) View.GONE else View.VISIBLE
         weatherError?.setOnClickListener { refreshWeather(true) }
-
-        val stamp = current.updatedAt.toString() + "/" + current.weatherCode + "/" +
-            current.daily.size + "/" + current.hourly.size
-        if (stamp == renderedWeather) return
-        renderedWeather = stamp
     }
 
     /** Big reading with the ring degree sign scaled down and raised, like the reference layout. */
@@ -1445,8 +1502,13 @@ class MainActivity : Activity() {
         button.setMinHeight(dp(44))
         button.setMinimumHeight(dp(44))
         button.setPadding(dp(14), dp(8), dp(14), dp(8))
-        val ripple = ColorStateList.valueOf(0x33FFFFFF)
-        button.background = RippleDrawable(ripple, round(0x24FFFFFF, 24), round(WHITE, 24))
+        button.applyLiquidGlass(
+            style = Glass.Style.CLEAR,
+            radiusDp = Glass.RADIUS_CONTROL_DP,
+            surface = theme.cardColor,
+            surfaceAlpha = 0.55f,
+            dark = !theme.isDay,
+        )
         button.setOnClickListener { onClick() }
         val params = LinearLayout.LayoutParams(-2, -2)
         params.rightMargin = dp(8)
@@ -1484,6 +1546,10 @@ class MainActivity : Activity() {
     companion object {
         private const val IMPORT_JSON = 110
         private const val VPN_PERMISSION = 111
+
+        /** Process-wide "tunnel was up" flag so a recreated activity does not re-toast on open. */
+        @Volatile
+        private var lastRunningObserved = false
         internal const val WHITE = -1 // Color.WHITE
         internal const val SOFT = -0x20000001 // 0xDFFFFFFF
         private const val T_DOCK_SLOT = 52

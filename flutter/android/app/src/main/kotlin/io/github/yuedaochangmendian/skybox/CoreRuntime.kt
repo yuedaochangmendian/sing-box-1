@@ -30,8 +30,8 @@ object CoreRuntime {
         options.fixAndroidStack = true
         options.logMaxLines = 300
         options.crashReportSource = "skybox"
-        options.appVersion = "8"
-        options.appMarketingVersion = "3.0.1"
+        options.appVersion = "9"
+        options.appMarketingVersion = "3.0.2"
         Libbox.setup(options)
         initialized = true
     }
